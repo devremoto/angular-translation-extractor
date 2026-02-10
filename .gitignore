@@ -125,6 +125,19 @@ dist
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
 
+# VS Code workspace settings (local)
+.vscode/
+
+# VS Code extension package
+*.vsix
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Agent tooling
+.agent/
+
 # yarn v3
 .pnp.*
 .yarn/*

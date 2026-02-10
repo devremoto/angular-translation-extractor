@@ -1,0 +1,221 @@
+{
+  "name": "src-i18n-extract-and-generate",
+  "displayName": "Angular Translation Extractor",
+  "description": "Extracts Angular app strings from JS/TS/HTML, generates per-file locale JSONs and translation loader artifacts.",
+  "version": "0.0.1",
+  "publisher": "AdilsondeAlmeidaPedro",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "angularTranslation.extract",
+        "title": "Angular: Extract translations"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "angularTranslation.extract",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "angularTranslation.extract",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "angularTranslation.extract",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Angular Translation Extractor",
+      "properties": {
+        "i18nExtractor.srcDir": {
+          "type": "string",
+          "default": "src",
+          "description": "Folder to scan (relative to workspace root)."
+        },
+        "i18nExtractor.outputRoot": {
+          "type": "string",
+          "default": "src/assets/i18n",
+          "description": "Output root folder (relative to workspace root). Folder structure from srcDir will be replicated inside."
+        },
+        "i18nExtractor.languagesJsonPath": {
+          "type": "string",
+          "default": "src/app/core/json/language-code.json",
+          "description": "Path to JSON containing array of locales to generate. Missing englishName/nativeName/flag will be auto-filled."
+        },
+        "i18nExtractor.baseLocaleCode": {
+          "type": "string",
+          "default": "en",
+          "description": "Base locale code to generate for English source strings (e.g. en, en-US, en-GB)."
+        },
+        "i18nExtractor.minStringLength": {
+          "type": "number",
+          "default": 2,
+          "description": "Ignore strings shorter than this."
+        },
+        "i18nExtractor.ignoreGlobs": {
+          "type": "array",
+          "default": [
+            "**/*.test.*",
+            "**/*.spec.*",
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/.next/**",
+            "**/.angular/**",
+            "**/assets/**",
+            "**/environments/**",
+            "**/.agent/**",
+            "**/.vscode/**"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns to ignore during scan."
+        },
+        "i18nExtractor.htmlAttributeNames": {
+          "type": "array",
+          "default": [
+            "title",
+            "alt",
+            "placeholder",
+            "aria-label",
+            "aria-placeholder"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "HTML attribute names to extract string values from."
+        },
+        "i18nExtractor.mainTsPath": {
+          "type": "string",
+          "default": "{srcDir}/main.ts",
+          "description": "Path to Angular main.ts. You can use {srcDir} as a placeholder."
+        },
+        "i18nExtractor.angularBootstrapStyle": {
+          "type": "string",
+          "default": "standalone",
+          "enum": [
+            "standalone",
+            "module"
+          ],
+          "description": "How to wire TranslateModule in main.ts."
+        },
+        "i18nExtractor.useTranslateCommand": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, run a translation command after generating base JSONs."
+        },
+        "i18nExtractor.translateCommand": {
+          "type": "string",
+          "default": "npx-translate",
+          "description": "Command to run (only if useTranslateCommand=true)."
+        },
+        "i18nExtractor.translateArgsTemplate": {
+          "type": "array",
+          "default": [
+            "--input",
+            "{baseFile}",
+            "--outDir",
+            "{outDir}",
+            "--from",
+            "{baseLocale}",
+            "--to",
+            "{targetLocale}"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Args template. Placeholders: {baseFile} {outDir} {baseLocale} {targetLocale}"
+        },
+        "i18nExtractor.updateMode": {
+          "type": "string",
+          "enum": [
+            "merge",
+            "overwrite",
+            "recreate"
+          ],
+          "default": "merge",
+          "description": "Controls how JSON translation files and generated files are updated. 'merge': Only adds new blank properties (preserves existing translations and JSON structure). 'overwrite': Recreates all JSON files except the default language. 'recreate': Recreates all files including the default language."
+        },
+        "i18nExtractor.skipGlobs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional glob patterns to skip during scan (merged with ignoreGlobs)."
+        },
+        "i18nExtractor.onlyGenerateActiveLangs": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, generate JSON files only for languages marked with 'active': true in i18n-languages.json. If false, generate for all languages."
+        },
+        "i18nExtractor.onlyMainLanguages": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, generate JSON files using only main language codes (e.g., 'en' instead of 'en-US', 'pt' instead of 'pt-BR'). The loader will automatically map region-specific codes to their main language."
+        },
+        "i18nExtractor.autoTranslate": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, automatically initiate translations for all target languages after extracting base locale strings."
+        },
+        "i18nExtractor.autoTranslateDefaultLanguage": {
+          "type": "boolean",
+          "default": false,
+          "description": "If false, skip translating the default language marked with 'default': true in i18n-languages.json. The default language is used as the translation source, so it typically doesn't need to be translated."
+        },
+        "i18nExtractor.translationService": {
+          "type": "string",
+          "enum": [
+            "google",
+            "libretranslate"
+          ],
+          "default": "google",
+          "description": "Translation service to use for automatic translation. 'google' (recommended, higher quality) or 'libretranslate' (free but lower quality)."
+        },
+        "i18nExtractor.googleTranslateDelay": {
+          "type": "number",
+          "default": 500,
+          "description": "Delay between translation requests in milliseconds to avoid rate limiting (minimum 100ms). Used for both Google Translate and LibreTranslate."
+        },
+        "i18nExtractor.singleFilePerLanguage": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, generate a single file per language in the i18n root directory instead of per-file translations. All strings are consolidated with file-path-based keys."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/babel__traverse": "^7.20.5",
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.24.0",
+    "@babel/traverse": "^7.24.0",
+    "fast-glob": "^3.3.2",
+    "axios": "^1.6.0"
+  }
+}
