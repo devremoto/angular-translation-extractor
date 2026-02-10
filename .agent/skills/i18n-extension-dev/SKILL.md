@@ -4,7 +4,7 @@ description: Procedures for developing, debugging, and maintaining the Angular i
 
 # Angular i18n Extractor Development
 
-This skill provides guidelines and commands for working with the `src-i18n-extract-and-generate` VS Code extension.
+This skill provides guidelines and commands for working with the `angular-tanslation-extractor` VS Code extension.
 
 ## Environment Setup
 

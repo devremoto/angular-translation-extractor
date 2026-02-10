@@ -925,13 +925,40 @@ If two different strings would generate the same key, the extension automaticall
 - VS Code 1.85.0 or higher
 - Node.js (for language metadata generation)
 
-## License
 
-MIT
+## 🤝 Contributing
 
-## Contributing
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
-Found a bug or have a feature request? Please open an issue on the repository.
+**Author**: Adilson de Almeida Pedro  
+**Website**: [https://adilson.almeidapedro.com.br](https://adilson.almeidapedro.com.br)  
+**GitHub**: [@devremoto](https://github.com/devremoto)  
+**Twitter**: [@devremoto](https://twitter.com/devremoto)  
+**LinkedIn**: [Adilson Pedro](https://www.linkedin.com/in/adilsonpedro/)
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE.txt) file for details.
+
+## 🆘 Support
+
+If you encounter any issues or have questions:
+
+1. Check the [Known Limitations](#-known-limitations) section
+2. Search existing [issues](https://github.com/devremoto/angular-template-mover/issues)
+3. Create a new issue with detailed reproduction steps
+
+## ⭐ Acknowledgments
+
+- Thanks to the Angular team for creating an amazing framework
+- Inspired by the need for better developer experience in Angular projects
+- Built with love for the Angular community by [Adilson de Almeida Pedro](https://github.com/devremoto)
+
+---
+
+**Enjoy coding with Angular Template Mover! 🎉**
+
+*Created by [Adilson de Almeida Pedro](https://adilson.almeidapedro.com.br) - Full Stack Developer*
 
 ---
 
