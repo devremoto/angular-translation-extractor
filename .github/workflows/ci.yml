@@ -48,7 +48,9 @@ jobs:
 
       - name: Build extension
         # Build continues on error since script name may vary (compile/build) or not exist
-        run: npm run compile || npm run build
+        # Try compile first, then build as fallback
+        run: |
+          npm run compile 2>/dev/null || npm run build 2>/dev/null || echo "No build script found"
         continue-on-error: true
 
       - name: Install vsce

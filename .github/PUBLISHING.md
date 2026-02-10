@@ -150,4 +150,4 @@ To install the packaged extension locally:
 
 - [VS Code Publishing Extensions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
 - [vsce Documentation](https://github.com/microsoft/vscode-vsce)
-- [Azure DevOps PAT](https://docs.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate)
+- [Azure DevOps PAT](https://learn.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate)
