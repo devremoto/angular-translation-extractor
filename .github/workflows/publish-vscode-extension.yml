@@ -49,8 +49,6 @@ jobs:
         # Publish on tag push or when manually triggered with publish=true
         if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
         run: vsce publish -p ${{ secrets.VSCE_PAT }}
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Upload extension artifact
         uses: actions/upload-artifact@v4

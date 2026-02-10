@@ -34,6 +34,7 @@ jobs:
         run: npm ci
 
       - name: Run linter
+        # Linter continues on error since not all projects may have linting configured
         run: npm run lint
         continue-on-error: true
 
@@ -42,6 +43,7 @@ jobs:
         continue-on-error: false
 
       - name: Build extension
+        # Build continues on error since script name may vary (compile/build) or not exist
         run: npm run compile || npm run build
         continue-on-error: true
 
