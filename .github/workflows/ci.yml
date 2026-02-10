@@ -16,6 +16,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read   # Required for checking out code
+      actions: read    # Required for workflow access
+
     strategy:
       matrix:
         node-version: [16, 18, 20]
