@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { extractFromJsTs } from './extractJsTs';
 import { replaceExtractedStrings } from './replaceSource';
-import { FoundString } from './types';
+import type { FoundString } from './types';
 
 async function run() {
     const testFile = path.resolve(__dirname, 'test-component.ts');

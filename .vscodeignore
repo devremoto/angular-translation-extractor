@@ -1,0 +1,44 @@
+# Source files
+src/**
+.vscode/**
+.vscode-test/**
+
+# Build files
+esbuild.js
+tsconfig.json
+eslint.config.js
+
+# Test files
+**/test/**
+**/*.test.*
+**/*.spec.*
+
+# Documentation
+docs/**
+COPILOT_PROMPT.md
+PUBLISHING_CHECKLIST.md
+PUBLISHING.md
+SINGLE_FILE_TRANSLATION_FEATURE.md
+
+# Version control
+.git/**
+.gitignore
+.gitattributes
+
+# Development files
+node_modules/**
+*.vsix
+*.log
+npm-debug.log*
+.DS_Store
+
+# Debug files
+src/debug_*.ts
+src/debug_*.js
+src/reproduce_issue.ts
+
+# Development scripts
+docs/publish-extension.bat
+
+# Only include compiled output
+!out/**/*.js

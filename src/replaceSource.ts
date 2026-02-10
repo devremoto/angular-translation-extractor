@@ -214,13 +214,12 @@ function indexFromLineCol(content: string, line: number, col: number): number {
     return index + col;
 }
 
-function escapeRegExp(text: string): string {
+function _escapeRegExp(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function addTranslateModuleImport(tsFile: string, addToComponentImports = false): Promise<boolean> {
     let content = await fs.readFile(tsFile, "utf8");
-    const original = content;
     let modified = false;
 
     // Check if TranslateModule import from @ngx-translate/core already exists
@@ -331,9 +330,6 @@ async function addTranslateServiceInjection(tsFile: string, bootstrapStyle: "sta
     const original = content;
     let modified = false;
 
-    const coreImportRegex = /import\s*\{[^}]*\bTranslateModule\b[^}]*\}\s*from\s*['"]@ngx-translate\/core['"]/.
-        test(content);
-
     // Note: The logic for TranslateService import check was simplified in previous edits but might be missing.
     // I should check for TranslateService import specifically.
     const hasTranslateServiceImport = /import\s*\{[^}]*\bTranslateService\b[^}]*\}\s*from\s*['"]@ngx-translate\/core['"]/.
@@ -365,8 +361,8 @@ async function addTranslateServiceInjection(tsFile: string, bootstrapStyle: "sta
     // For standalone components, use inject()
     if (bootstrapStyle === "standalone") {
         // Check if inject is imported
-        if (!/import\s*\{[^}]*\binject\b[^}]*\}\s*from\s*['"](\@angular\/core|angular)['"];?/.test(content)) {
-            const coreImportMatch2 = /import\s*\{([^}]*)\}\s*from\s*['"](\@angular\/core|angular)['"];?/.exec(content);
+        if (!/import\s*\{[^}]*\binject\b[^}]*\}\s*from\s*['"](@angular\/core|angular)['"];?/.test(content)) {
+            const coreImportMatch2 = /import\s*\{([^}]*)\}\s*from\s*['"](@angular\/core|angular)['"];?/.exec(content);
             if (coreImportMatch2) {
                 const names = coreImportMatch2[1];
                 if (!/\binject\b/.test(names)) {

@@ -15,7 +15,7 @@ async function runTests() {
 
     // Mock axios.get
     const originalGet = axios.get;
-    (axios as any).get = async (url: string) => {
+    (axios.get as unknown) = async (url: string) => {
         googleUrl = url;
         return { data: [[["Translated Value"]]] };
     };
@@ -42,16 +42,16 @@ async function runTests() {
         console.error("❌ Google Translate test failed with error:", e);
         failures++;
     } finally {
-        (axios as any).get = originalGet;
+        (axios.get as unknown) = originalGet;
     }
 
     // --- Test 2: LibreTranslate Source Param ---
     console.log("\nTest 2: LibreTranslate receives sourceLang parameter");
-    let libreBody: any = {};
+    let libreBody: Record<string, unknown> = {};
 
     // Mock axios.post
     const originalPost = axios.post;
-    (axios as any).post = async (url: string, body: any) => {
+    (axios.post as unknown) = async (url: string, body: Record<string, unknown>) => {
         libreBody = body;
         return { data: { translatedText: "Translated Value" } };
     };
@@ -77,9 +77,9 @@ async function runTests() {
     } finally {
         (axios as any).post = originalPost;
         // Cleanup
-        try { await fs.unlink(tempFile); } catch { }
-        try { await fs.unlink(path.resolve(__dirname, 'pt.json')); } catch { }
-        try { await fs.unlink(path.resolve(__dirname, 'it.json')); } catch { }
+        try { await fs.unlink(tempFile); } catch { /* no-op */ }
+        try { await fs.unlink(path.resolve(__dirname, 'pt.json')); } catch { /* no-op */ }
+        try { await fs.unlink(path.resolve(__dirname, 'it.json')); } catch { /* no-op */ }
     }
 
     // --- Test 3: Generated Google Script Content ---

@@ -16,7 +16,7 @@ export async function updateMainTs(opts: {
     updateMode: "merge" | "overwrite" | "recreate";
     outputRoot: string;
 }): Promise<UpdateMainTsResult> {
-    const { workspaceRoot, srcDir, mainTsPath, baseLocaleCode, bootstrapStyle, updateMode, outputRoot } = opts;
+    const { workspaceRoot, srcDir, mainTsPath, baseLocaleCode, bootstrapStyle, outputRoot } = opts;
 
     // Convert outputRoot to relative path for use in loader (e.g., "src/assets/I18n" -> "./assets/I18n/")
     const outputRootRelative = `./${outputRoot.replace(/^src\//, "")}/`.replace(/\/\/+/g, "/");
@@ -25,14 +25,13 @@ export async function updateMainTs(opts: {
     const abs = path.isAbsolute(resolvedRel) ? resolvedRel : path.join(workspaceRoot, resolvedRel);
 
     let content: string;
-    let original: string;
     try {
         content = await fs.readFile(abs, "utf8");
-        original = content;
-    } catch (err) {
+    } catch (_err) {
         return { updated: false, reason: "main.ts not found", mainTsPath: abs };
     }
 
+    const original = content;
     const hasImportProvidersFrom = content.includes("importProvidersFrom");
     const hasTranslateModule = /importProvidersFrom\s*\(\s*TranslateModule\.forRoot/.test(content);
 
@@ -137,7 +136,7 @@ function updateBootstrapApplication(content: string, providerExpr: string): stri
         return null;
     }
 
-    const { full, args, start, end } = call;
+    const { args, start, end } = call;
     const parts = splitTopLevelArgs(args);
     const appArg = parts[0] ?? "AppComponent";
     const configArg = parts[1];

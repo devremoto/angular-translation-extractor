@@ -152,7 +152,7 @@ function isProbablyUserFacing(s: string, minLen: number): boolean {
   if (/^\s*\}\s*@/i.test(t) || /^\s*\}\s*\{/i.test(t)) return false;
 
   // Skip content that's just brackets and symbols
-  if (/^[\{\}\(\)\[\]\s@]+$/.test(t)) return false;
+  if (/^[{}()[\]\s@]+$/.test(t)) return false;
 
   // Skip strings with escaped quotes (likely HTML fragments)
   if (/\\"/.test(t)) return false;
@@ -161,7 +161,7 @@ function isProbablyUserFacing(s: string, minLen: number): boolean {
   if (/=["']|["']\s*(class|id|type|name|placeholder|title|alt|aria|data)\s*=/i.test(t)) return false;
 
   // Skip strings that look like HTML class values (space-separated words with hyphens)
-  if (/^[a-z0-9\-]+(\s+[a-z0-9\-]+)*$/i.test(t) && t.includes('-')) return false;
+  if (/^[a-z0-9-]+(\s+[a-z0-9-]+)*$/i.test(t) && t.includes('-')) return false;
 
   // Skip strings that are clearly escaped HTML or contain control flow patterns
   if (/\\[nt"'`<>\\]/.test(t)) return false;

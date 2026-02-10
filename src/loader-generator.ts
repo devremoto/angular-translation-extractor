@@ -425,7 +425,7 @@ export async function generateLoaderArtifacts(opts: {
   onlyMainLanguages?: boolean;
   singleFilePerLanguage?: boolean;
 }): Promise<{ loaderPath: string; readmePath: string; languageSelectorPath: string; packageJsonUpdated: boolean; packageJsonReason?: string }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, onlyMainLanguages, singleFilePerLanguage } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, onlyMainLanguages, singleFilePerLanguage: _singleFilePerLanguage } = opts;
 
   const translateDirAbs = path.join(workspaceRoot, srcDir, "translate");
   await ensureDir(translateDirAbs);
@@ -1140,7 +1140,7 @@ function buildManifest(opts: {
           const localeMatch = entry.name.match(/^(.+)\.json$/);
           if (localeMatch) {
             const locale = localeMatch[1];
-            if (locales.hasOwnProperty(locale) && !fileSet.has(relPath)) {
+            if (Object.prototype.hasOwnProperty.call(locales, locale) && !fileSet.has(relPath)) {
               fileSet.add(relPath);
               locales[locale].push(relPath);
             }
