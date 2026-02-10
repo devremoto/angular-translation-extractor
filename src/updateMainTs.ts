@@ -16,7 +16,7 @@ export async function updateMainTs(opts: {
     updateMode: "merge" | "overwrite" | "recreate";
     outputRoot: string;
 }): Promise<UpdateMainTsResult> {
-    const { workspaceRoot, srcDir, mainTsPath, baseLocaleCode, bootstrapStyle, outputRoot } = opts;
+    const { workspaceRoot, srcDir, mainTsPath, baseLocaleCode, bootstrapStyle, updateMode, outputRoot } = opts;
 
     // Convert outputRoot to relative path for use in loader (e.g., "src/assets/I18n" -> "./assets/I18n/")
     const outputRootRelative = `./${outputRoot.replace(/^src\//, "")}/`.replace(/\/\/+/g, "/");
@@ -36,7 +36,7 @@ export async function updateMainTs(opts: {
     const hasTranslateModule = /importProvidersFrom\s*\(\s*TranslateModule\.forRoot/.test(content);
 
     // Remove existing TranslateModule configurations to ensure fresh setup
-    if (hasTranslateModule) {
+    if (hasTranslateModule && updateMode !== 'merge') {
         content = removeExistingTranslateModuleConfig(content);
     }
 
@@ -56,28 +56,34 @@ export async function updateMainTs(opts: {
     }
 
     if (importLines.size) {
-        const insertAt = findLastImportIndex(content) + 1;
-        content = insertAt >= 0
+        const lastImportIdx = findLastImportIndex(content);
+        const insertAt = lastImportIdx >= 0 ? lastImportIdx : 0;
+
+        content = insertAt > 0
             ? content.slice(0, insertAt) + Array.from(importLines).join("\n") + "\n" + content.slice(insertAt)
             : Array.from(importLines).join("\n") + "\n" + content;
     }
 
-    content = upsertHttpLoaderFactory(content, outputRootRelative);
+    content = upsertHttpLoaderFactory(content, outputRootRelative, updateMode);
 
     const providerExpr = `importProvidersFrom(TranslateModule.forRoot({\n        defaultLanguage: "${baseLocaleCode}",\n        loader: {\n          provide: TranslateLoader,\n          useFactory: HttpLoaderFactory,\n          deps: [HttpClient]\n        }\n      }))`;
 
     let bootstrapUpdated = false;
-    if (bootstrapStyle === "standalone") {
-        const updated = updateBootstrapApplication(content, providerExpr);
-        if (updated) {
-            content = updated;
-            bootstrapUpdated = true;
-        }
-    } else {
-        const updated = updateBootstrapModule(content, providerExpr);
-        if (updated) {
-            content = updated;
-            bootstrapUpdated = true;
+    const shouldUpdateBootstrap = !hasTranslateModule || updateMode !== 'merge';
+
+    if (shouldUpdateBootstrap) {
+        if (bootstrapStyle === "standalone") {
+            const updated = updateBootstrapApplication(content, providerExpr);
+            if (updated) {
+                content = updated;
+                bootstrapUpdated = true;
+            }
+        } else {
+            const updated = updateBootstrapModule(content, providerExpr);
+            if (updated) {
+                content = updated;
+                bootstrapUpdated = true;
+            }
         }
     }
 
@@ -99,10 +105,16 @@ export async function updateMainTs(opts: {
     }
 }
 
-function upsertHttpLoaderFactory(content: string, outputRootRelative: string): string {
+function upsertHttpLoaderFactory(content: string, outputRootRelative: string, updateMode: string): string {
     // Match the entire HttpLoaderFactory function - more flexible to catch all variants
     // Matches: export function HttpLoaderFactory(...) [: ReturnType] { ... }
     const factoryRegex = /export\s+function\s+HttpLoaderFactory\s*\([^)]*\)(?:\s*:\s*\w+)?\s*\{(?:[^{}]|\{[^}]*\})*?\}\s*\n*/g;
+
+    // If merge mode and factory exists, keep it
+    if (updateMode === 'merge' && factoryRegex.test(content)) {
+        return content;
+    }
+
     const factoryBody = `export function HttpLoaderFactory(http: HttpClient): TranslateLoader {\n  return new TgTranslationLoader(http, "${outputRootRelative}");\n}\n`;
 
     // Remove all existing HttpLoaderFactory functions to avoid duplicates
@@ -125,7 +137,16 @@ function findLastImportIndex(content: string): number {
     let match: RegExpExecArray | null;
     let lastIndex = -1;
     while ((match = importRegex.exec(content))) {
-        lastIndex = match.index + match[0].length + 1;
+        // match[0] contains the line text excluding newline chars usually, 
+        // but let's be safe and check what follows
+        const endOfMatchIndex = match.index + match[0].length;
+
+        // Find the actual end of line including newline characters
+        let current = endOfMatchIndex;
+        if (current < content.length && content[current] === '\r') current++;
+        if (current < content.length && content[current] === '\n') current++;
+
+        lastIndex = current;
     }
     return lastIndex;
 }

@@ -19,7 +19,12 @@ export async function scanForStrings(opts: {
 
   const patterns = EXTS.map(ext => `${srcAbsPosix}/**/*.${ext}`);
   const mergedIgnoreGlobs = [...cfg.ignoreGlobs, ...cfg.skipGlobs, "**/main.ts", "**/index.html", "**/translate/**"];
+
+  console.log(`[scan] Looking for files in: ${srcAbsPosix}`);
+  console.log(`[scan] Patterns: ${patterns.join(", ")}`);
+
   const files = await fg(patterns, { ignore: mergedIgnoreGlobs, dot: false });
+  console.log(`[scan] Found ${files.length} files matching patterns`);
 
   const out: FoundString[] = [];
 

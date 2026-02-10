@@ -23,15 +23,25 @@
   "categories": [
     "Other"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "activationEvents": [
-    "onCommand:angularTranslation.extract"
+    "onCommand:angularTranslation.extract",
+    "onCommand:angularTranslation.reverseFromFolder",
+    "onCommand:angularTranslation.reverseFromFile"
   ],
   "contributes": {
     "commands": [
       {
         "command": "angularTranslation.extract",
         "title": "Angular: Extract translations"
+      },
+      {
+        "command": "angularTranslation.reverseFromFolder",
+        "title": "Angular: Reverse Translate (Folder)"
+      },
+      {
+        "command": "angularTranslation.reverseFromFile",
+        "title": "Angular: Reverse Translate (File)"
       }
     ],
     "menus": {
@@ -39,17 +49,39 @@
         {
           "command": "angularTranslation.extract",
           "group": "navigation"
+        },
+        {
+          "command": "angularTranslation.reverseFromFolder",
+          "group": "navigation"
+        },
+        {
+          "command": "angularTranslation.reverseFromFile",
+          "group": "navigation"
         }
       ],
       "explorer/context": [
         {
           "command": "angularTranslation.extract",
           "group": "navigation"
+        },
+        {
+          "command": "angularTranslation.reverseFromFolder",
+          "group": "navigation",
+          "when": "explorerResourceIsFolder"
+        },
+        {
+          "command": "angularTranslation.reverseFromFile",
+          "group": "navigation",
+          "when": "explorerResourceIsFolder == false"
         }
       ],
       "editor/title": [
         {
           "command": "angularTranslation.extract",
+          "group": "navigation"
+        },
+        {
+          "command": "angularTranslation.reverseFromFile",
           "group": "navigation"
         }
       ]

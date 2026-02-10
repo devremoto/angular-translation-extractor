@@ -4,6 +4,29 @@ import { readdirSync, existsSync } from "node:fs";
 import { LanguageEntry } from "./types";
 import { ensureDir } from "./utils";
 
+export async function updateManifest(opts: {
+  workspaceRoot: string;
+  outputRoot: string;
+  baseLocaleCode: string;
+  languages: LanguageEntry[];
+  onlyMainLanguages?: boolean;
+}) {
+  const outputRootAbs = path.join(opts.workspaceRoot, opts.outputRoot);
+  const manifestPath = path.join(outputRootAbs, "translate-manifest.json");
+
+  // Build manifest relying on scan only (empty baseFiles)
+  const manifest = buildManifest({
+    outputRootAbs,
+    baseLocaleCode: opts.baseLocaleCode,
+    languages: opts.languages,
+    baseFiles: [],
+    onlyMainLanguages: opts.onlyMainLanguages
+  });
+
+  await ensureDir(outputRootAbs);
+  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+}
+
 export function getGoogleTranslateScript(outputRoot: string, baseLocaleCode: string): string {
   return `const fs = require("fs");
 const path = require("path");
@@ -1027,9 +1050,9 @@ Run the command: **Angular Translation Extractor: Extract Strings** from the VS 
   if (await shouldWriteFile(readmePath, allowOverwrite)) {
     await fs.writeFile(readmePath, readme, "utf8");
   }
-  if (await shouldWriteFile(manifestPath, allowOverwrite)) {
-    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
-  }
+
+  // Always update manifest to reflect current state of files
+  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
 
   // Generate language selector component
   const selectorComponentPath = path.join(translateDirAbs, "language-selector.component.ts");

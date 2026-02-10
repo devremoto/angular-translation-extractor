@@ -9,11 +9,13 @@ import { LanguageEntry } from "./types";
 import { normalizeLanguages } from "./langMeta";
 import { ensureDir, readJsonIfExists } from "./utils";
 import { generatePerFileLocales } from "./generate";
-import { generateLoaderArtifacts } from "./loader-generator";
+import { generateLoaderArtifacts, updateManifest } from "./loader-generator";
 import { replaceExtractedStrings } from "./replaceSource";
 import { updateMainTs } from "./updateMainTs";
 import { runTranslateCommand } from "./translate";
 import { updateAngularJson } from "./updateAngularJson";
+import { captureConsoleLogs } from "./console-capture";
+import { reverseTranslateFileScope, reverseTranslateFolderScope } from './reverse';
 
 const execAsync = promisify(exec);
 
@@ -68,8 +70,8 @@ async function ensurePackagesInstalled(workspaceRoot: string, output: vscode.Out
 
     output.appendLine(`[angular-i18n] ✓ Packages installed successfully`);
     return true;
-  } catch (err: any) {
-    const errorMsg = err?.message || String(err);
+  } catch (err: unknown) {
+    const errorMsg = (err as Record<string, unknown>)?.message || String(err);
     output.appendLine(`[angular-i18n] ✗ Failed to install packages: ${errorMsg}`);
     output.appendLine(`[angular-i18n] Please run manually: npm install ${missingPackages.join(" ")} --force --save-dev`);
     return false;
@@ -126,12 +128,27 @@ export function activate(context: vscode.ExtensionContext) {
       output.appendLine(`[angular-i18n] Languages to generate (${generatedLangs.length}): ${generatedLangs.map(l => l.code).join(", ")}`);
       output.appendLine(`[angular-i18n] onlyMainLanguages: ${cfg.onlyMainLanguages}`);
 
+      // Update manifest immediately with known languages
+      // This ensures external tools or translation scripts have a valid manifest even if extraction finds 0 strings
+      try {
+        await updateManifest({
+          workspaceRoot: root,
+          outputRoot: cfg.outputRoot,
+          baseLocaleCode: baseLocaleCode,
+          languages: langs,
+          onlyMainLanguages: cfg.onlyMainLanguages
+        });
+        output.appendLine(`[angular-i18n] Updated translate-manifest.json`);
+      } catch (err) {
+        output.appendLine(`[angular-i18n] ⚠ Failed to pre-update manifest: ${err}`);
+      }
+
       output.appendLine(`[angular-i18n] Scanning ${cfg.srcDir}/ (js/ts/html)...`);
       const found = await scanForStrings({ workspaceRoot: root, cfg });
       output.appendLine(`[angular-i18n] Found ${found.length} candidate strings.`);
 
       // Count by type for debugging
-      const byKind = found.reduce((acc: any, f) => {
+      const byKind = found.reduce((acc: Record<string, number>, f) => {
         acc[f.kind] = (acc[f.kind] || 0) + 1;
         return acc;
       }, {});
@@ -196,8 +213,8 @@ export function activate(context: vscode.ExtensionContext) {
           outputRoot: cfg.outputRoot
         });
         output.appendLine(`[angular-i18n] ✓ Updated angular.json assets configuration`);
-      } catch (err: any) {
-        output.appendLine(`[angular-i18n] ⚠ Could not update angular.json: ${err.message}`);
+      } catch (err: unknown) {
+        output.appendLine(`[angular-i18n] ⚠ Could not update angular.json: ${(err as Record<string, unknown>)?.message || String(err)}`);
       }
 
       //if (cfg.updateMode !== "merge") {
@@ -228,8 +245,16 @@ export function activate(context: vscode.ExtensionContext) {
       output.appendLine(`[angular-i18n] Language selector component: ${loaderArtifacts.languageSelectorPath}`);
 
       if (cfg.autoTranslate && (cfg.translationService === "google" || cfg.translationService === "libretranslate")) {
-        const translatorModule = cfg.translationService === "google" ? "./google-translate" : "./libretranslate";
-        const { translateJsonFile } = await import(translatorModule);
+        // Dynamic imports with variables confuse esbuild, so we must use static imports
+        let translateJsonFile: any;
+        if (cfg.translationService === "google") {
+          const mod = await import("./google-translate");
+          translateJsonFile = mod.translateJsonFile;
+        } else {
+          const mod = await import("./libretranslate");
+          translateJsonFile = mod.translateJsonFile;
+        }
+
         const fg = await import("fast-glob");
 
         const serviceName = cfg.translationService === "google" ? "Google Translate" : "LibreTranslate";
@@ -299,8 +324,8 @@ export function activate(context: vscode.ExtensionContext) {
               // Add delay to avoid rate limiting
               const delay = Math.max(100, cfg.googleTranslateDelay);
               await new Promise(resolve => setTimeout(resolve, delay));
-            } catch (err: any) {
-              output.appendLine(`[angular-i18n] ${serviceName} failed for ${targetLocale}: ${err.message}. Continuing...`);
+            } catch (err: unknown) {
+              output.appendLine(`[angular-i18n] ${serviceName} failed for ${targetLocale}: ${(err as Record<string, unknown>)?.message || String(err)}. Continuing...`);
             }
           }
         }
@@ -348,20 +373,173 @@ export function activate(context: vscode.ExtensionContext) {
         } else {
           output.appendLine(`[angular-i18n] ng build completed.`);
         }
-      } catch (err: any) {
-        output.appendLine(`[angular-i18n] ng build error: ${err?.message || String(err)}`);
+      } catch (err: unknown) {
+        output.appendLine(`[angular-i18n] ng build error: ${(err as Record<string, unknown>)?.message || String(err)}`);
       }
 
       vscode.window.showInformationMessage("Angular translation extraction completed.");
       output.appendLine(`[angular-i18n] Done ✅`);
-    } catch (err: any) {
-      const msg = err?.message ? String(err.message) : String(err);
+    } catch (err: unknown) {
+      const msg = (err as Record<string, unknown>)?.message ? String((err as Record<string, unknown>).message) : String(err);
       vscode.window.showErrorMessage(`Angular translation extraction failed: ${msg}`);
       output.appendLine(`[angular-i18n] Failed ❌ ${msg}`);
     }
   });
 
   context.subscriptions.push(disposable);
+
+  // Register reverse translation from folder
+  const reverseFromFolderDisposable = vscode.commands.registerCommand(
+    "angularTranslation.reverseFromFolder",
+    async (folderUri: vscode.Uri) => {
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders?.length) {
+        vscode.window.showErrorMessage("Open a workspace folder first.");
+        return;
+      }
+
+      const root = folders[0].uri.fsPath;
+      const cfg = getConfig();
+      const folderPath = folderUri?.fsPath || root;
+
+      const output = vscode.window.createOutputChannel(
+        "Angular Translation Reverse"
+      );
+      output.show(true);
+
+      const restoreConsole = captureConsoleLogs(output);
+
+      try {
+        output.appendLine(
+          `[angular-i18n-reverse] Starting reverse translation for folder: ${folderPath}`
+        );
+        output.appendLine(
+          `[angular-i18n-reverse] Base locale code: ${cfg.baseLocaleCode}`
+        );
+
+        const result = await reverseTranslateFolderScope(
+          folderPath,
+          root,
+          path.join(root, cfg.srcDir),
+          path.join(root, cfg.outputRoot),
+          cfg.languagesJsonPath,
+          cfg.baseLocaleCode,
+          cfg.onlyMainLanguages,
+          cfg.ignoreGlobs,
+          { appendLine: (msg: string) => output.appendLine(msg) }
+        );
+
+        output.appendLine(
+          `[angular-i18n-reverse] Completed: ${result.success} replacements made`
+        );
+        if (result.failed > 0) {
+          output.appendLine(
+            `[angular-i18n-reverse] ${result.failed} replacements failed`
+          );
+        }
+
+        if (result.errors.length > 0) {
+          output.appendLine("[angular-i18n-reverse] Errors:");
+          result.errors.forEach((err: string) =>
+            output.appendLine(`  - ${err}`)
+          );
+        }
+
+        vscode.window.showInformationMessage(
+          `Reverse translation completed: ${result.success} replacements made`
+        );
+      } catch (err: unknown) {
+        const msg = (err as Record<string, unknown>)?.message ? String((err as Record<string, unknown>).message) : String(err);
+        vscode.window.showErrorMessage(
+          `Reverse translation failed: ${msg}`
+        );
+        output.appendLine(`[angular-i18n-reverse] Failed ❌ ${msg}`);
+      } finally {
+        restoreConsole();
+      }
+    }
+  );
+
+  context.subscriptions.push(reverseFromFolderDisposable);
+
+  // Register reverse translation from file
+  const reverseFromFileDisposable = vscode.commands.registerCommand(
+    "angularTranslation.reverseFromFile",
+    async (fileUri: vscode.Uri) => {
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders?.length) {
+        vscode.window.showErrorMessage("Open a workspace folder first.");
+        return;
+      }
+
+      const root = folders[0].uri.fsPath;
+      const cfg = getConfig();
+      const filePath = fileUri?.fsPath;
+
+      if (!filePath) {
+        vscode.window.showErrorMessage("No file selected.");
+        return;
+      }
+
+      const output = vscode.window.createOutputChannel(
+        "Angular Translation Reverse"
+      );
+      output.show(true);
+
+      const restoreConsole = captureConsoleLogs(output);
+
+      try {
+        output.appendLine(
+          `[angular-i18n-reverse] Starting reverse translation for file: ${filePath}`
+        );
+        output.appendLine(
+          `[angular-i18n-reverse] Base locale code: ${cfg.baseLocaleCode}`
+        );
+
+        const result = await reverseTranslateFileScope(
+          filePath,
+          root,
+          path.join(root, cfg.srcDir),
+          path.join(root, cfg.outputRoot),
+          cfg.languagesJsonPath,
+          cfg.baseLocaleCode,
+          cfg.onlyMainLanguages,
+          cfg.ignoreGlobs,
+          { appendLine: (msg: string) => output.appendLine(msg) }
+        );
+
+        output.appendLine(
+          `[angular-i18n-reverse] Completed: ${result.success} replacements made`
+        );
+        if (result.failed > 0) {
+          output.appendLine(
+            `[angular-i18n-reverse] ${result.failed} replacements failed`
+          );
+        }
+
+        if (result.errors.length > 0) {
+          output.appendLine("[angular-i18n-reverse] Errors:");
+          result.errors.forEach((err: string) =>
+            output.appendLine(`  - ${err}`)
+          );
+        }
+
+        vscode.window.showInformationMessage(
+          `Reverse translation completed: ${result.success} replacements made`
+        );
+      } catch (err: unknown) {
+        const msg = (err as Record<string, unknown>)?.message ? String((err as Record<string, unknown>).message) : String(err);
+        vscode.window.showErrorMessage(
+          `Reverse translation failed: ${msg}`
+        );
+        output.appendLine(`[angular-i18n-reverse] Failed ❌ ${msg}`);
+      } finally {
+        restoreConsole();
+      }
+    }
+  );
+
+  context.subscriptions.push(reverseFromFileDisposable);
 }
 
 export function deactivate() { }
