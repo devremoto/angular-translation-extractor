@@ -1,0 +1,91 @@
+name: Publish VS Code Extension
+
+on:
+  # Trigger on new tags matching v* (e.g., v0.0.1, v1.0.0)
+  push:
+    tags:
+      - 'v*'
+
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to marketplace (true/false)'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+        continue-on-error: false
+
+      - name: Install vsce (VS Code Extension Manager)
+        run: npm install -g @vscode/vsce
+
+      - name: Package extension
+        run: vsce package
+
+      - name: Publish to VS Code Marketplace
+        # Publish on tag push or when manually triggered with publish=true
+        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')
+        run: vsce publish -p ${{ secrets.VSCE_PAT }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: '*.vsix'
+          retention-days: 30
+
+      - name: Create GitHub Release
+        # Only create release on tag push
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: '*.vsix'
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# Required secrets:
+# - VSCE_PAT: Personal Access Token from Azure DevOps for publishing to VS Code Marketplace
+#
+#   To create a PAT:
+#   1. Go to https://dev.azure.com/
+#   2. Sign in with your Microsoft account (use the same account as your VS Code publisher)
+#   3. Click on User Settings (top right) > Personal Access Tokens
+#   4. Click "New Token"
+#   5. Set Name: "VS Code Marketplace Publishing"
+#   6. Organization: "All accessible organizations"
+#   7. Expiration: Choose an appropriate duration
+#   8. Scopes: Click "Show all scopes" and select "Marketplace" > "Manage"
+#   9. Click "Create" and copy the token
+#   10. Add it to GitHub repository secrets as VSCE_PAT:
+#       - Go to your GitHub repository
+#       - Settings > Secrets and variables > Actions
+#       - Click "New repository secret"
+#       - Name: VSCE_PAT
+#       - Value: Paste your token
+#       - Click "Add secret"
