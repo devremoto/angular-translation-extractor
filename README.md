@@ -192,7 +192,108 @@ const title = `User Profile`;
 }
 ```
 
-## Output Structure
+## Configuration Settings
+
+You can configure the extension through VS Code settings (`settings.json`) or the Settings UI:
+
+| Setting ID | Description | Default |
+|------------|-------------|---------|
+| `i18nExtractor.srcDir` | Source folder to scan | `src` |
+| `i18nExtractor.outputRoot` | Output folder for translations | `src/assets/i18n` |
+| `i18nExtractor.languagesJsonPath` | Path to your languages JSON file | `src/app/core/json/language-code.json` |
+| `i18nExtractor.baseLocaleCode` | Base locale code (fallback) | `en` |
+| `i18nExtractor.minStringLength` | Ignore strings shorter than this | `2` |
+| `i18nExtractor.ignoreGlobs` | Glob patterns to ignore | `["**/*.test.*", "**/*.spec.*", "**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**", "**/.angular/**", "**/app.html", "**/index.html", "**/assets/**", "**/environments/**", "**/.agent/**", "**/.vscode/**"]` |
+| `i18nExtractor.skipGlobs` | Additional glob patterns to skip | `[]` |
+| `i18nExtractor.htmlAttributeNames` | HTML attributes to extract | `["title", "alt", "placeholder", "aria-label", "aria-placeholder"]` |
+| `i18nExtractor.mainTsPath` | Path to `main.ts` | `{srcDir}/main.ts` |
+| `i18nExtractor.angularBootstrapStyle` | `standalone` or `module` | `standalone` |
+| `i18nExtractor.updateMode` | Source source updates: `merge`, `overwrite`, `recreate` | `merge` |
+| `i18nExtractor.onlyGenerateActiveLangs` | Only generate files for `active: true` languages | `true` |
+| `i18nExtractor.onlyMainLanguages` | Use main language code (en) instead of full (en-US) | `false` |
+| `i18nExtractor.singleFilePerLanguage` | Consolidate all strings into one file per language | `true` |
+| `i18nExtractor.autoTranslate` | Automatically translate keys | `true` |
+| `i18nExtractor.autoTranslateDefaultLanguage` | Translate source language (usually false) | `false` |
+| `i18nExtractor.translationService` | Service: `google` or `libretranslate` | `google` |
+| `i18nExtractor.googleTranslateDelay` | Delay between translation API calls (ms) | `500` |
+| `i18nExtractor.enableTransalationCache` | Enable sessionStorage caching | `false` |
+| `i18nExtractor.useTranslateCommand` | Run custom command after extration | `false` |
+| `i18nExtractor.translateCommand` | Custom translation command | `npx-translate` |
+| `i18nExtractor.translateArgsTemplate` | Arguments for custom command | `["--input", "{baseFile}", "--outDir", "{outDir}", "--from", "{baseLocale}", "--to", "{targetLocale}"]` |
+
+### Language Configuration File
+
+The `languagesJsonPath` file defines your supported languages:
+
+```json
+[
+  {
+    "rank": 1,
+    "code": "en-US",
+    "englishName": "English (United States)",
+    "nativeName": "English (United States)",
+    "flag": "https://flagcdn.com/w40/us.png",
+    "default": true,
+    "active": true
+  },
+  {
+    "rank": 2,
+    "code": "pt-BR",
+    "englishName": "Portuguese (Brazil)",
+    "nativeName": "Português (Brasil)",
+    "flag": "https://flagcdn.com/w40/br.png",
+    "default": false,
+    "active": true
+  },
+  {
+    "rank": 3,
+    "code": "pt-PT",
+    "englishName": "Portuguese (Portugal)",
+    "nativeName": "Português (Portugal)",
+    "flag": "https://flagcdn.com/w40/pt.png",
+    "default": false,
+    "active": false
+  },
+  {
+    "rank": 4,
+    "code": "es-ES",
+    "englishName": "Spanish (Spain)",
+    "nativeName": "Español (España)",
+    "flag": "https://flagcdn.com/w40/es.png",
+    "default": false,
+    "active": true
+  },
+  {
+    "rank": 5,
+    "code": "fr-FR",
+    "englishName": "French (France)",
+    "nativeName": "Français (France)",
+    "flag": "https://flagcdn.com/w40/fr.png",
+    "default": false,
+    "active": true
+  },
+  {
+    "rank": 6,
+    "code": "it-IT",
+    "englishName": "Italian (Italy)",
+    "nativeName": "Italiano (Italia)",
+    "flag": "https://flagcdn.com/w40/it.png",
+    "default": false,
+    "active": true
+  },
+  {
+    "rank": 7,
+    "code": "zh-CN",
+    "englishName": "Chinese (Simplified, China)",
+    "nativeName": "中文 (中国)",
+    "flag": "https://flagcdn.com/w40/cn.png",
+    "default": false,
+    "active": true
+  }
+]
+```
+
+**Note:** If this file doesn't exist, the extension will automatically create it with a default set of languages. Properties like `englishName`, `nativeName`, and `flag` are auto-filled if missing.
 
 ## Output Structure
 

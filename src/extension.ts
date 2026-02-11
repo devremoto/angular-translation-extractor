@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 import { getConfig, ExtConfig } from "./config";
 import { scanForStrings } from "./scan";
 import { LanguageEntry, FoundString } from "./types";
@@ -100,9 +101,27 @@ async function loadAndNormalizeLanguages(workspaceRoot: string, languagesJsonPat
 }
 
 function isPackageInstalled(pkgName: string, nodeModulesPath: string): boolean {
-  const pkgPath = path.join(nodeModulesPath, pkgName);
   try {
-    require.resolve(pkgPath);
+    // Try to resolve from the workspace node_modules
+    const workspacePkgPath = path.join(nodeModulesPath, pkgName);
+
+    // Check if package.json exists in that folder
+    // checking package.json is safer than require.resolve which might look recursively or fail on index files
+    const pkgJsonPath = path.join(workspacePkgPath, "package.json");
+    // We use fs.access to check existence, need to import 'fs' inside or use promise based fs 
+    // Since this is sync in the original code, we can't easily use async fs here without changing signature.
+    // However, the original code used `require.resolve(pkgPath)`.
+    // The issue with `require.resolve(pkgPath)` is that pkgPath is a directory (`.../node_modules/axios`), 
+    // so it tries to find the entry point. If the entry point is main.js, it works. 
+    // But this module resolution happens in the EXTENSION'S context, not the workspace's.
+
+    // BETTER APPROACH: Just check if the folder exists in user's node_modules
+    // It's a heuristic but sufficient for "is it installed".
+
+    // We need to use fs.stat (sync) or similar, but we only have 'fs/promises' imported as 'fs'.
+    // Let's import 'fs' sync just for this check.
+    // const fsSync = require("node:fs"); // We already imported it as fsSync at the top
+    fsSync.accessSync(pkgJsonPath);
     return true;
   } catch {
     return false;
@@ -111,15 +130,14 @@ function isPackageInstalled(pkgName: string, nodeModulesPath: string): boolean {
 
 async function ensurePackagesInstalled(workspaceRoot: string, output: vscode.OutputChannel): Promise<boolean> {
   const nodeModulesPath = path.join(workspaceRoot, "node_modules");
-  const packagesToCheck = ["axios", "fast-glob"];
+
+  // Extension dependencies (axios, fast-glob) are bundled with the extension via esbuild.
+  // We should NOT check for them in the user's project.
+  // The user only needs the runtime angular dependencies.
+
   const missingPackages: string[] = [];
 
-  for (const pkg of packagesToCheck) {
-    if (!isPackageInstalled(pkg, nodeModulesPath)) {
-      missingPackages.push(pkg);
-    }
-  }
-
+  // We only check for the runtime dependencies the user needs in THEIR project
   if (!isPackageInstalled("@ngx-translate/core", nodeModulesPath)) {
     missingPackages.push("@ngx-translate/core");
   }
@@ -133,6 +151,7 @@ async function ensurePackagesInstalled(workspaceRoot: string, output: vscode.Out
     return true;
   }
 
+  output.appendLine(`[angular-i18n] ⚠ Missing packages: ${missingPackages.join(", ")}`);
   return false;
 }
 
