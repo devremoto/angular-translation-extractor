@@ -55,6 +55,10 @@ async function ensurePackagesInstalled(workspaceRoot: string, output: vscode.Out
     missingPackages.push("@ngx-translate/core");
   }
 
+  if (!isPackageInstalled("@ngx-translate/http-loader", nodeModulesPath)) {
+    missingPackages.push("@ngx-translate/http-loader");
+  }
+
   if (missingPackages.length === 0) {
     output.appendLine(`[angular-i18n] ✓ All required packages are installed`);
     return true;
