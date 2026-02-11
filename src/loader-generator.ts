@@ -690,6 +690,8 @@ export class LanguageSelectorComponent implements OnInit {
             });
           }
           
+          this.languages.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+          
           const currentLang = this.translateService.currentLang || this.translateService.defaultLang;
           if (currentLang) {
             this.currentLanguage = this.languages.find(l => l.code === currentLang) || this.languages[0] || null;

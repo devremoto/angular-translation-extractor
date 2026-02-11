@@ -23,7 +23,76 @@ async function loadAndNormalizeLanguages(workspaceRoot: string, languagesJsonPat
   const abs = path.join(workspaceRoot, languagesJsonPath);
   await ensureDir(path.dirname(abs));
 
-  const entries = await readJsonIfExists<LanguageEntry[]>(abs, []);
+  let entries = await readJsonIfExists<LanguageEntry[]>(abs, []);
+
+  if (entries.length === 0) {
+    entries = [
+      {
+        "rank": 1,
+        "code": "en-US",
+        "englishName": "English (United States)",
+        "nativeName": "English (United States)",
+        "flag": "https://flagcdn.com/w40/us.png",
+        "default": true,
+        "active": true
+      },
+      {
+        "rank": 2,
+        "code": "pt-BR",
+        "englishName": "Portuguese (Brazil)",
+        "nativeName": "Português (Brasil)",
+        "flag": "https://flagcdn.com/w40/br.png",
+        "default": false,
+        "active": true
+      },
+      {
+        "rank": 3,
+        "code": "pt-PT",
+        "englishName": "Portuguese (Portugal)",
+        "nativeName": "Português (Portugal)",
+        "flag": "https://flagcdn.com/w40/pt.png",
+        "default": false,
+        "active": false
+      },
+      {
+        "rank": 4,
+        "code": "en-ES",
+        "englishName": "English (Spain)",
+        "nativeName": "English (Spain)",
+        "flag": "https://flagcdn.com/w40/es.png",
+        "default": false,
+        "active": true
+      },
+      {
+        "rank": 5,
+        "code": "fr-FR",
+        "englishName": "French (France)",
+        "nativeName": "Français (France)",
+        "flag": "https://flagcdn.com/w40/fr.png",
+        "default": false,
+        "active": true
+      },
+      {
+        "rank": 6,
+        "code": "it-IT",
+        "englishName": "Italian (Italy)",
+        "nativeName": "Italiano (Italia)",
+        "flag": "https://flagcdn.com/w40/it.png",
+        "default": false,
+        "active": true
+      },
+      {
+        "rank": 7,
+        "code": "zh-CN",
+        "englishName": "Chinese (Simplified, China)",
+        "nativeName": "中文 (中国)",
+        "flag": "https://flagcdn.com/w40/cn.png",
+        "default": false,
+        "active": true
+      }
+    ];
+  }
+
   const normalized = normalizeLanguages(entries);
 
   await fs.writeFile(abs, JSON.stringify(normalized, null, 2) + "\n", "utf8");
