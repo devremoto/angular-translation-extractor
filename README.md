@@ -530,25 +530,6 @@ You can also use a custom translation command/service:
 }
 ```
 
-### Manual Translation Scripts (for your target app)
-
-After extraction, you can run translations manually using npm scripts. Add these to your app's `package.json`:
-
-```json
-{
-  "scripts": {
-    "i18n:translate:google": "node scripts/translate-google.js",
-    "i18n:translate:libretranslate": "node scripts/translate-libretranslate.js"
-  }
-}
-```
-
-Run them:
-```bash
-npm run i18n:translate:google        # High-quality translations
-npm run i18n:translate:libretranslate  # Lower-quality (use only if needed)
-```
-
 **Create `scripts/translate-google.js`:**
 ```javascript
 const fs = require('fs');

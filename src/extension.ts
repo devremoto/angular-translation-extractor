@@ -1,8 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import { getConfig, ExtConfig } from "./config";
 import { scanForStrings } from "./scan";
 import { LanguageEntry, FoundString } from "./types";
@@ -15,11 +13,11 @@ import { updateMainTs } from "./updateMainTs";
 import { runTranslateCommand } from "./translate";
 import { updateAngularJson } from "./updateAngularJson";
 import { captureConsoleLogs } from "./console-capture";
-import { reverseTranslateFileScope, reverseTranslateFolderScope } from './reverse';
+import { reverseTranslateFileScope, reverseTranslateFolderScope, reverseTranslateSelectionScope } from './reverse';
 import { extractFromJsTs } from "./extractJsTs";
 import { extractFromHtml } from "./extractHtml";
 
-const execAsync = promisify(exec);
+
 
 async function loadAndNormalizeLanguages(workspaceRoot: string, languagesJsonPath: string): Promise<LanguageEntry[]> {
   const abs = path.join(workspaceRoot, languagesJsonPath);
@@ -58,26 +56,7 @@ async function ensurePackagesInstalled(workspaceRoot: string, output: vscode.Out
     return true;
   }
 
-  output.appendLine(`[angular-i18n] ⚠ Missing packages: ${missingPackages.join(", ")}`);
-  output.appendLine(`[angular-i18n] Installing: npm install ${missingPackages.join(" ")} --force --save-dev`);
-
-  try {
-    const { stdout, stderr } = await execAsync(`npm install ${missingPackages.join(" ")} --force --save-dev`, {
-      cwd: workspaceRoot,
-      timeout: 60000
-    });
-
-    if (stdout) output.appendLine(`[angular-i18n] npm install stdout: ${stdout}`);
-    if (stderr) output.appendLine(`[angular-i18n] npm install stderr: ${stderr}`);
-
-    output.appendLine(`[angular-i18n] ✓ Packages installed successfully`);
-    return true;
-  } catch (err: unknown) {
-    const errorMsg = (err as Record<string, unknown>)?.message || String(err);
-    output.appendLine(`[angular-i18n] ✗ Failed to install packages: ${errorMsg}`);
-    output.appendLine(`[angular-i18n] Please run manually: npm install ${missingPackages.join(" ")} --force --save-dev`);
-    return false;
-  }
+  return false;
 }
 
 async function processLocalesAndArtifacts(
@@ -208,7 +187,7 @@ async function executeAutoTranslate(
   }
 
   // Dynamic imports
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   let translateJsonFile: any;
   if (cfg.translationService === "google") {
     const mod = await import("./google-translate");
@@ -637,6 +616,79 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(reverseFromFileDisposable);
+
+  // Register reverse translation from selection
+  const reverseSelectionDisposable = vscode.commands.registerCommand(
+    "angularTranslation.reverseSelection",
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders?.length) {
+        vscode.window.showErrorMessage("Open a workspace folder first.");
+        return;
+      }
+
+      const root = folders[0].uri.fsPath;
+      const cfg = getConfig();
+      const filePath = editor.document.uri.fsPath;
+      const selection = editor.selection;
+
+      const output = vscode.window.createOutputChannel(
+        "Angular Translation Reverse"
+      );
+      output.show(true);
+
+      const restoreConsole = captureConsoleLogs(output);
+
+      try {
+        output.appendLine(
+          `[angular-i18n-reverse] Starting reverse translation for selection in: ${filePath}`
+        );
+
+        const result = await reverseTranslateSelectionScope(
+          filePath,
+          {
+            startLine: selection.start.line + 1,
+            startCol: selection.start.character + 1,
+            endLine: selection.end.line + 1,
+            endCol: selection.end.character + 1,
+          },
+          root,
+          path.join(root, cfg.srcDir),
+          path.join(root, cfg.outputRoot),
+          cfg.languagesJsonPath,
+          cfg.baseLocaleCode,
+          cfg.onlyMainLanguages,
+          cfg.ignoreGlobs,
+          { appendLine: (msg: string) => output.appendLine(msg) }
+        );
+
+        output.appendLine(
+          `[angular-i18n-reverse] Completed: ${result.success} replacements made`
+        );
+
+        if (result.success > 0 || result.failed > 0) {
+          vscode.window.showInformationMessage(
+            `Reverse translation completed: ${result.success} replacements made`
+          );
+        } else {
+          vscode.window.showInformationMessage("No translatable keys found in selection.");
+        }
+
+      } catch (err: unknown) {
+        const msg = (err as Record<string, unknown>)?.message ? String((err as Record<string, unknown>).message) : String(err);
+        vscode.window.showErrorMessage(
+          `Reverse translation failed: ${msg}`
+        );
+      } finally {
+        restoreConsole();
+      }
+    }
+  );
+
+  context.subscriptions.push(reverseSelectionDisposable);
 }
 
 export function deactivate() { }

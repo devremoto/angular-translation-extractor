@@ -3,7 +3,6 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { translateJsonFile as googleTranslate } from '../google-translate';
 import { translateJsonFile as libreTranslate } from '../libretranslate';
-import { getGoogleTranslateScript, getLibretranslateScript } from '../loader-generator';
 
 async function runTests() {
     console.log("🧪 Starting verification tests...\n");
@@ -80,33 +79,6 @@ async function runTests() {
         try { await fs.unlink(tempFile); } catch { /* no-op */ }
         try { await fs.unlink(path.resolve(__dirname, 'pt.json')); } catch { /* no-op */ }
         try { await fs.unlink(path.resolve(__dirname, 'it.json')); } catch { /* no-op */ }
-    }
-
-    // --- Test 3: Generated Google Script Content ---
-    console.log("\nTest 3: Generated Google Script uses effective base lang");
-    const googleScript = getGoogleTranslateScript("src/assets/i18n", "en-US");
-
-    // Check if it uses split logic for source
-    // Expect: sl: getMainLang(EFFECTIVE_BASE_LANG) || "auto"
-    if (googleScript.includes('sl: getMainLang(EFFECTIVE_BASE_LANG) || "auto"')) {
-        console.log("✅ Google Script template contains correct source lang logic");
-    } else {
-        console.error("❌ Google Script template logic incorrect.");
-        console.log("Expected: sl: getMainLang(EFFECTIVE_BASE_LANG) || \"auto\"");
-        failures++;
-    }
-
-    // --- Test 4: Generated LibreScript Content ---
-    console.log("\nTest 4: Generated LibreTranslate Script uses effective base lang");
-    const libreScript = getLibretranslateScript("src/assets/i18n", "en-US");
-
-    // Expect: source: getMainLang(EFFECTIVE_BASE_LANG) || "auto"
-    if (libreScript.includes('source: getMainLang(EFFECTIVE_BASE_LANG) || "auto"')) {
-        console.log("✅ LibreTranslate Script template contains correct source lang logic");
-    } else {
-        console.error("❌ LibreTranslate Script template logic incorrect.");
-        console.log("Expected: source: getMainLang(EFFECTIVE_BASE_LANG) || \"auto\"");
-        failures++;
     }
 
     console.log(`\nTests completed. ${failures} failures.`);

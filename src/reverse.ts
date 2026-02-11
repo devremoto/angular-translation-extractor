@@ -116,111 +116,188 @@ export async function loadTranslationKeyMap(
     return keyMap;
 }
 
+// Regex patterns for different types of i18n usage
+const PATTERN_TYPES = {
+    INTERPOLATION: "interpolation",    // {{ 'KEY' | translate }}
+    BOUND_ATTR: "bound_attr",          // [attr]="'KEY' | translate"
+    INTERPOLATED_ATTR: "interp_attr",  // attr="{{ 'KEY' | translate }}"
+    DIRECTIVE: "directive",            // translate="KEY" or [translate]="'KEY'"
+    TS_CALL: "ts_call"                 // i18n('KEY'), .instant('KEY'), .get('KEY')
+};
+
+type ReversePattern = {
+    regex: RegExp;
+    type: string;
+    keyGroup: number;
+    attrGroup?: number;
+};
+
+const REVERSE_PATTERNS: ReversePattern[] = [
+    // {{ 'KEY' | translate }} (with optional parameters) - multiline aware, space tolerant
+    {
+        // Matches {{ 'KEY' | translate }} across lines, handling whitespace liberally
+        // The regex needs to consume the entire block including newlines
+        // [\s\S]*? is a non-greedy match for any character including newlines
+        regex: /{{\s*['"`]([\s\S]*?)['"`]\s*\|\s*translate(?:\s*:\s*[^}]+)?\s*}}/g,
+        type: PATTERN_TYPES.INTERPOLATION,
+        keyGroup: 1
+    },
+    // [attr]="'KEY' | translate"
+    {
+        regex: /\[([a-zA-Z0-9-]+)\]\s*=\s*(['"])\s*(['"])([^'"`]+)\3\s*\|\s*translate(?:\s*:\s*(?:(?!\2).)+)?\s*\2/gms,
+        type: PATTERN_TYPES.BOUND_ATTR,
+        keyGroup: 4,
+        attrGroup: 1
+    },
+    // attr="{{ 'KEY' | translate }}"
+    {
+        regex: /\b([a-zA-Z0-9-]+)\s*=\s*(['"])\s*{{\s*(['"])([^'"`]+)\3\s*\|\s*translate(?:\s*:\s*[^}]+)?\s*}}\s*\2/gms,
+        type: PATTERN_TYPES.INTERPOLATED_ATTR,
+        keyGroup: 4,
+        attrGroup: 1
+    },
+    // [translate]="'KEY'"
+    {
+        regex: /\[translate\]\s*=\s*(['"])\s*(['"])([^'"`]+)\2\s*\1/gms,
+        type: PATTERN_TYPES.DIRECTIVE,
+        keyGroup: 3
+    },
+    // translate="KEY"
+    {
+        regex: /\btranslate\s*=\s*(['"])([^'"`]+)\1/gms,
+        type: PATTERN_TYPES.DIRECTIVE,
+        keyGroup: 2
+    },
+    // i18n('KEY') or i18nPipe ('KEY' | i18nPipe)
+    {
+        regex: /i18n\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/gms,
+        type: PATTERN_TYPES.TS_CALL,
+        keyGroup: 1
+    },
+    {
+        regex: /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*i18nPipe\s*}}/gms,
+        type: PATTERN_TYPES.INTERPOLATION,
+        keyGroup: 1
+    },
+    {
+        regex: /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*i18n\s*}}/gms,
+        type: PATTERN_TYPES.INTERPOLATION,
+        keyGroup: 1
+    },
+    // TS calls: .instant('KEY'), .get('KEY')
+    {
+        regex: /(?:\bthis\.\w+|\btranslate)\.instant\s*\(\s*(['"])([^'"]+)\1\s*\)/gms,
+        type: PATTERN_TYPES.TS_CALL,
+        keyGroup: 2
+    },
+    {
+        regex: /(?:\bthis\.\w+|\btranslate)\.get\s*\(\s*(['"])([^'"]+)\1\s*\)/gms,
+        type: PATTERN_TYPES.TS_CALL,
+        keyGroup: 2
+    },
+    // Parenthesized ('KEY' | translate)
+    {
+        regex: /\(\s*['"`]([^'"`]+)['"`]\s*\|\s*translate\s*\)/gms,
+        type: PATTERN_TYPES.TS_CALL,
+        keyGroup: 1
+    }
+];
+
 /**
  * Find all i18n function calls in source files
  * Simple strategy: scan all files, look for patterns, match keys
  */
 export async function findI18nMatches(
-    srcDir: string,
+    targetDir: string,
     keyMap: Map<string, string>,
-    ignoreGlobs: string[]
+    ignoreGlobs: string[],
+    srcDirForRel?: string
 ): Promise<ReversalMatch[]> {
     const matches: ReversalMatch[] = [];
 
-    // Regex patterns to find i18n calls
-    const patterns = [
-        // {{ 'KEY' | translate }} - MOST COMMON ANGULAR
-        /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*translate\s*}}/g,
-        // ('KEY' | translate) - PARENTHESIZED VERSION
-        /\(\s*['"`]([^'"`]+)['"`]\s*\|\s*translate\s*\)/g,
-        // i18n('KEY')
-        /i18n\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-        // {{ 'KEY' | i18nPipe }}
-        /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*i18nPipe\s*}}/g,
-        // {{ 'KEY' | i18n }}
-        /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*i18n\s*}}/g,
-        // this.[service].instant('KEY')
-        /this\.\w+\.instant\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-        // translate.get('KEY')
-        /translate\.get\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-        // this.translate.get('KEY')
-        /this\.translate\.get\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-        // this.[service].get('KEY')
-        /this\.\w+\.get\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-    ];
-
     console.log(`[reverse] 🔍 Scanning source files...`);
 
-    // Glob expects forward slashes, so convert Windows paths
-    const srcDirForGlob = srcDir.replace(/\\/g, '/');
-    const sourcePattern = `${srcDirForGlob}/**/*.{ts,tsx,js,jsx,html}`;
-    console.log(`[reverse] 🔍 Source pattern: ${sourcePattern}`);
-    console.log(`[reverse] 🔍 Ignore globs: ${ignoreGlobs.join(', ')}`);
+    // Check if targetDir is a file or directory
+    const stats = await fs.stat(targetDir);
+    let sourceFiles: string[] = [];
 
-    const sourceFiles = await glob(sourcePattern, {
-        absolute: true,
-        ignore: ignoreGlobs,
-    });
+    if (stats.isFile()) {
+        sourceFiles = [targetDir];
+    } else {
+        // Glob expects forward slashes, so convert Windows paths
+        const targetDirForGlob = targetDir.replace(/\\/g, '/');
+        const sourcePattern = `${targetDirForGlob}/**/*.{ts,tsx,js,jsx,html}`;
+        console.log(`[reverse] 🔍 Source pattern: ${sourcePattern}`);
+
+        sourceFiles = await glob(sourcePattern, {
+            absolute: true,
+            ignore: ignoreGlobs,
+        });
+    }
 
     console.log(`[reverse] 📂 Found ${sourceFiles.length} source files to scan`);
-
-    if (sourceFiles.length === 0) {
-        console.log(`[reverse] ⚠️  No source files found! Check srcDir and ignoreGlobs`);
-        return matches;
-    }
-
-    if (sourceFiles.length < 10) {
-        sourceFiles.forEach(f => console.log(`[reverse]   - ${path.relative(srcDir, f)}`));
-    } else {
-        console.log(`[reverse]   First 5 files:`);
-        sourceFiles.slice(0, 5).forEach(f => console.log(`[reverse]   - ${path.relative(srcDir, f)}`));
-    }
 
     for (const sourceFile of sourceFiles) {
         try {
             const content = await fs.readFile(sourceFile, "utf8");
-            const lines = content.split("\n");
-            const fileRelFromSrc = path.relative(srcDir, sourceFile);
+            const fileRelFromSrc = path.relative(srcDirForRel || targetDir, sourceFile);
             let fileMatchCount = 0;
 
-            for (let lineNum = 0; lineNum < lines.length; lineNum++) {
-                const line = lines[lineNum];
+            for (const p of REVERSE_PATTERNS) {
+                let match;
+                p.regex.lastIndex = 0;
 
-                for (const pattern of patterns) {
-                    let match;
-                    pattern.lastIndex = 0;
+                while ((match = p.regex.exec(content)) !== null) {
+                    const fullMatch = match[0];
+                    const extractedKey = match[p.keyGroup];
 
-                    while ((match = pattern.exec(line)) !== null) {
-                        const fullMatch = match[0];
-                        const extractedKey = match[1];
+                    if (keyMap.has(extractedKey)) {
+                        const value = keyMap.get(extractedKey);
+                        if (!value) continue;
 
-                        if (keyMap.has(extractedKey)) {
-                            const value = keyMap.get(extractedKey);
-                            if (!value) continue;
+                        // Calculate line number for logging/reporting
+                        // This involves scanning newlines up to the match index
+                        const linesUpToMatch = content.substring(0, match.index).split('\n');
+                        const lineNum = linesUpToMatch.length;
+                        const column = linesUpToMatch[linesUpToMatch.length - 1].length + 1;
 
-                            // Determine replacement format
-                            let replacementText: string;
-                            if (fullMatch.includes("{{")) {
+                        // Determine replacement text based on pattern type
+                        let replacementText: string;
+                        switch (p.type) {
+                            case PATTERN_TYPES.INTERPOLATION:
                                 replacementText = value;
-                            } else {
-                                replacementText = `'${value}'`;
+                                break;
+                            case PATTERN_TYPES.BOUND_ATTR: {
+                                const attrNameBound = match[p.attrGroup ?? 0];
+                                replacementText = `${attrNameBound}="${value}"`;
+                                break;
                             }
-
-                            fileMatchCount++;
-
-                            matches.push({
-                                fileAbs: sourceFile,
-                                fileRelFromSrc,
-                                line: lineNum + 1,
-                                column: (match.index ?? 0) + 1,
-                                text: fullMatch,
-                                key: extractedKey,
-                                replacementText,
-                            });
-
-                            console.log(`[reverse] ✅ Found: ${fileRelFromSrc}:${lineNum + 1}`);
-                            console.log(`[reverse]      "${fullMatch}" → "${replacementText}"`);
+                            case PATTERN_TYPES.INTERPOLATED_ATTR: {
+                                const attrNameInterp = match[p.attrGroup ?? 0];
+                                replacementText = `${attrNameInterp}="${value}"`;
+                                break;
+                            }
+                            case PATTERN_TYPES.DIRECTIVE:
+                                replacementText = value;
+                                break;
+                            case PATTERN_TYPES.TS_CALL:
+                                replacementText = `'${value}'`;
+                                break;
+                            default:
+                                replacementText = value;
                         }
+
+                        fileMatchCount++;
+
+                        matches.push({
+                            fileAbs: sourceFile,
+                            fileRelFromSrc,
+                            line: lineNum,
+                            column: column,
+                            text: fullMatch,
+                            key: extractedKey,
+                            replacementText: replacementText,
+                        });
                     }
                 }
             }
@@ -330,7 +407,8 @@ export async function applyReverseTranslations(
             let fileReplacements = 0;
             for (const match of sorted) {
                 if (content.includes(match.text)) {
-                    content = content.replace(match.text, match.replacementText);
+                    // Use a function as second argument to avoid special '$' character issues
+                    content = content.replace(match.text, () => match.replacementText);
                     success++;
                     fileReplacements++;
                     log(`[reverse]   ✅ Line ${match.line}: "${match.text.substring(0, 50)}..."`);
@@ -407,15 +485,9 @@ export async function reverseTranslateFolderScope(
         }
 
         log(`[reverse] 🔍 Finding matches in source files...`);
-        const allMatches = await findI18nMatches(srcDir, keyMap, ignoreGlobs);
-        log(`[reverse] Found ${allMatches.length} total matches`);
-
-        // Filter to folder scope
-        const folderMatches = allMatches.filter(m => {
-            const rel = path.relative(folderPath, m.fileAbs);
-            return !rel.startsWith("..");
-        });
-        log(`[reverse] Filtered to ${folderMatches.length} matches in folder scope`);
+        // Efficient scanning: only scan the folder path, but pass srcDir for correct relative path calculation
+        const folderMatches = await findI18nMatches(folderPath, keyMap, ignoreGlobs, srcDir);
+        log(`[reverse] Found ${folderMatches.length} matches in folder scope`);
 
         log(`[reverse] 🚀 Applying replacements...`);
         return await applyReverseTranslations(folderMatches, outputChannel);
@@ -461,54 +533,76 @@ export async function reverseTranslateFileScope(
             };
         }
 
-        log(`[reverse] Reading file...`);
-        const content = await fs.readFile(filePath, "utf8");
-        const lines = content.split("\n");
-        const fileMatches: ReversalMatch[] = [];
+        log(`[reverse] Reading and matching file...`);
+        // Use the common findI18nMatches for consistency
+        const fileMatches = await findI18nMatches(filePath, keyMap, [], srcDir);
 
-        const patterns = [
-            /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*translate\s*}}/g,
-            /\(\s*['"`]([^'"`]+)['"`]\s*\|\s*translate\s*\)/g,
-            /i18n\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-            /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*i18nPipe\s*}}/g,
-            /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*i18n\s*}}/g,
-            /this\.\w+\.instant\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-            /translate\.get\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-            /this\.translate\.get\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-            /this\.\w+\.get\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
-        ];
-
-        for (let lineNum = 0; lineNum < lines.length; lineNum++) {
-            const line = lines[lineNum];
-
-            for (const pattern of patterns) {
-                let match;
-                pattern.lastIndex = 0;
-
-                while ((match = pattern.exec(line)) !== null) {
-                    const fullMatch = match[0];
-                    const extractedKey = match[1];
-
-                    if (keyMap.has(extractedKey)) {
-                        const value = keyMap.get(extractedKey);
-                        if (!value) continue;
-                        let replacementText = fullMatch.includes("{{") ? value : `'${value}'`;
-
-                        fileMatches.push({
-                            fileAbs: filePath,
-                            fileRelFromSrc: path.basename(filePath),
-                            line: lineNum + 1,
-                            column: (match.index ?? 0) + 1,
-                            text: fullMatch,
-                            key: extractedKey,
-                            replacementText,
-                        });
-                    }
-                }
-            }
+        if (fileMatches.length === 0) {
+            log(`[reverse] ⚠️ No translation keys found in ${path.basename(filePath)} that exist in the key map.`);
+            return { success: 0, failed: 0, errors: [] };
         }
 
         return await applyReverseTranslations(fileMatches, outputChannel);
+    } catch (error) {
+        log(`[reverse] Error: ${error}`);
+        return {
+            success: 0,
+            failed: 0,
+            errors: [`Error: ${error}`],
+        };
+    }
+}
+
+/**
+ * Reverse translate from a specific selection in a file
+ */
+export async function reverseTranslateSelectionScope(
+    filePath: string,
+    selection: { startLine: number, startCol: number, endLine: number, endCol: number },
+    workspaceRoot: string,
+    srcDir: string,
+    outputRoot: string,
+    languagesJsonPath: string,
+    baseLocaleCode: string,
+    onlyMainLanguages: boolean,
+    ignoreGlobs: string[],
+    outputChannel?: { appendLine: (line: string) => void }
+): Promise<{ success: number; failed: number; errors: string[] }> {
+    const log = (msg: string) => {
+        console.log(msg);
+        if (outputChannel) outputChannel.appendLine(msg);
+    };
+
+    try {
+        log(`[reverse] Loading translations...`);
+        const keyMap = await loadTranslationKeyMap(workspaceRoot, outputRoot, languagesJsonPath, baseLocaleCode, onlyMainLanguages, log);
+
+        if (keyMap.size === 0) {
+            return {
+                success: 0,
+                failed: 0,
+                errors: [`No translations found in ${outputRoot}`],
+            };
+        }
+
+        log(`[reverse] Matching selection in file...`);
+        const allFileMatches = await findI18nMatches(filePath, keyMap, [], srcDir);
+
+        // Filter matches to those that overlap with the selection
+        const selectionMatches = allFileMatches.filter(m => {
+            // Check if match start is within selection
+            const isAfterStart = m.line > selection.startLine || (m.line === selection.startLine && m.column >= selection.startCol);
+            const isBeforeEnd = m.line < selection.endLine || (m.line === selection.endLine && m.column <= selection.endCol);
+            return isAfterStart && isBeforeEnd;
+        });
+
+        if (selectionMatches.length === 0) {
+            log(`[reverse] ⚠️ No translation keys found in selection.`);
+            return { success: 0, failed: 0, errors: [] };
+        }
+
+        log(`[reverse] Found ${selectionMatches.length} matches in selection.`);
+        return await applyReverseTranslations(selectionMatches, outputChannel);
     } catch (error) {
         log(`[reverse] Error: ${error}`);
         return {

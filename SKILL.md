@@ -34,13 +34,21 @@ Controlled by `onlyMainLanguages` setting:
   - Files: `en.json`, `pt.json`, `es.json`
   - Extracts main language from full code (`en` from `en-US`)
 
+ ### Key Construction Rule
+
+  - Keys are built following a strict structure: `[FOLDERS].[FILE_NAME].[KEY]`
+  - Example: `APP.SHARED.COMPONENTS.STATUS_MODAL.STATUS_MODAL_COMPONENT.CLOSE`
+    - Folder path: `APP.SHARED.COMPONENTS.STATUS_MODAL`
+    - File: `STATUS_MODAL_COMPONENT`
+    - Translation key: `CLOSE`
+   
+
 ### Translation Modes
 
 Two file generation strategies controlled by `singleFilePerLanguage`:
 
 1. **Single File Per Language** (`singleFilePerLanguage: true`, default since v0.0.1)
    - One consolidated file per language in `outputRoot`: `en-US.json`, `pt-BR.json`
-   - Keys are prefixed with file path: `APP.COMPONENTS.USER_PROFILE.TITLE`
    - Better for large applications, easier to manage
 
 2. **Per-File Locales** (`singleFilePerLanguage: false`, legacy)
