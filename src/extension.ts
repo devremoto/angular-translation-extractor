@@ -15,7 +15,7 @@ import { updateMainTs } from "./updateMainTs";
 import { runTranslateCommand } from "./translate";
 import { updateAngularJson } from "./updateAngularJson";
 import { captureConsoleLogs } from "./console-capture";
-import { reverseTranslateFileScope, reverseTranslateFolderScope } from './reverse';
+import { reverseTranslateFileScope, reverseTranslateFolderScope, loadTranslationKeyMap } from './reverse';
 import { extractFromJsTs } from "./extractJsTs";
 import { extractFromHtml } from "./extractHtml";
 
@@ -208,7 +208,7 @@ async function executeAutoTranslate(
   }
 
   // Dynamic imports
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   let translateJsonFile: any;
   if (cfg.translationService === "google") {
     const mod = await import("./google-translate");
@@ -388,7 +388,15 @@ export function activate(context: vscode.ExtensionContext) {
     const ext = path.extname(fileAbs).toLowerCase();
 
     let range = new vscode.Range(selection.start, selection.end);
-    let text = editor.document.getText(range);
+    let text = editor.document.getText(range).trim();
+
+    // Strip enclosing quotes from the selection
+    if ((text.startsWith('"') && text.endsWith('"')) ||
+      (text.startsWith("'") && text.endsWith("'"))) {
+      if (text.length >= 2) {
+        text = text.slice(1, -1);
+      }
+    }
 
     // Handle TS/JS quotes expansion
     if (ext === ".ts" || ext === ".js") {
@@ -571,7 +579,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       const root = folders[0].uri.fsPath;
       const cfg = getConfig();
-      const filePath = fileUri?.fsPath;
+      let filePath = fileUri?.fsPath || vscode.window.activeTextEditor?.document.uri.fsPath;
 
       if (!filePath) {
         vscode.window.showErrorMessage("No file selected.");
@@ -637,6 +645,107 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(reverseFromFileDisposable);
+
+  // Register reverse translation from selection
+  const reverseSelectionDisposable = vscode.commands.registerCommand(
+    "angularTranslation.reverseSelection",
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+      const selection = editor.selection;
+      if (selection.isEmpty) return;
+
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders?.length) return;
+
+      const root = folders[0].uri.fsPath;
+      const cfg = getConfig();
+      const output = vscode.window.createOutputChannel("Angular Translation Reverse");
+      output.show(true);
+
+      const selectionText = editor.document.getText(selection).trim();
+
+      try {
+        output.appendLine(`[reverse-selection] Loading translations for: ${cfg.baseLocaleCode}`);
+        const keyMap = await loadTranslationKeyMap(
+          root,
+          path.join(root, cfg.outputRoot),
+          cfg.languagesJsonPath,
+          cfg.baseLocaleCode,
+          cfg.onlyMainLanguages,
+          (msg) => output.appendLine(msg)
+        );
+
+        if (keyMap.size === 0) {
+          vscode.window.showWarningMessage("No translations found. Check the output channel for details.");
+          return;
+        }
+
+        const patterns = [
+          /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*translate\s*}}/gs,
+          /\(\s*['"`]([^'"`]+)['"`]\s*\|\s*translate\s*\)/gs,
+          /i18n\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/gs,
+          /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*i18nPipe\s*}}/gs,
+          /{{\s*['"`]([^'"`]+)['"`]\s*\|\s*i18n\s*}}/gs,
+          /this\.\w+\.instant\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/gs,
+          /translate\.get\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/gs,
+          /this\.translate\.get\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/gs,
+          /this\.\w+\.get\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/gs,
+          /['"`]([^'"`]+)['"`]/gs, // Quoted string fallback
+        ];
+
+        let replacement: string | null = null;
+        let foundKey: string | null = null;
+
+        // Try to find any pattern that matches the selection
+        for (const pattern of patterns) {
+          pattern.lastIndex = 0;
+          const match = pattern.exec(selectionText);
+          // If the selection contains the pattern (or is the pattern)
+          if (match) {
+            const key = match[1].trim();
+            if (keyMap.has(key)) {
+              foundKey = key;
+              const value = keyMap.get(key);
+              if (value) {
+                // Determine if we should wrap in quotes
+                // If it's a pipe {{ }} or code this.instant(), we just put the text
+                // If it was just a quoted string, we put the new quoted text
+                const isCodeOrPipe = selectionText.includes("{{") || selectionText.includes("(") || selectionText.includes("this.");
+                replacement = isCodeOrPipe ? value : `'${value}'`;
+                break;
+              }
+            }
+          }
+        }
+
+        // Final fallback: try to use the whole selection as a key directly
+        if (!foundKey && keyMap.has(selectionText)) {
+          foundKey = selectionText;
+          replacement = keyMap.get(selectionText) || null;
+        }
+
+        if (replacement) {
+          await editor.edit(editBuilder => {
+            editBuilder.replace(selection, replacement!);
+          });
+          vscode.window.showInformationMessage(`Reverted key '${foundKey}'`);
+          output.appendLine(`[reverse-selection] ✅ Replaced key '${foundKey}' with '${replacement}'`);
+        } else {
+          output.appendLine(`[reverse-selection] ❌ Selected text did not match any known key or pattern.`);
+          output.appendLine(`[reverse-selection] Selection: "${selectionText}"`);
+          vscode.window.showWarningMessage("Selection does not match any translation pattern or key not found.");
+        }
+
+      } catch (err: unknown) {
+        const msg = (err as Record<string, unknown>)?.message ? String((err as Record<string, unknown>).message) : String(err);
+        vscode.window.showErrorMessage(`Reverse selection failed: ${msg}`);
+        output.appendLine(`[reverse-selection] ❌ Error: ${msg}`);
+      }
+    }
+  );
+
+  context.subscriptions.push(reverseSelectionDisposable);
 }
 
 export function deactivate() { }

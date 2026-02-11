@@ -46,6 +46,10 @@
       {
         "command": "angularTranslation.reverseFromFile",
         "title": "Angular: Reverse Translate (File)"
+      },
+      {
+        "command": "angularTranslation.reverseSelection",
+        "title": "Angular: Reverse Translate (Selection)"
       }
     ],
     "menus": {
@@ -88,12 +92,22 @@
         {
           "command": "angularTranslation.extractFile",
           "group": "navigation",
-          "when": "resourceLangId == typescript || resourceLangId == html"
+          "when": "!editorHasSelection && (resourceLangId == typescript || resourceLangId == javascript || resourceLangId == html || resourceLangId == angular-html)"
         },
         {
           "command": "angularTranslation.extractSelection",
           "group": "navigation",
-          "when": "editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
+          "when": "editorHasSelection && (resourceLangId == typescript || resourceLangId == javascript || resourceLangId == html || resourceLangId == angular-html)"
+        },
+        {
+          "command": "angularTranslation.reverseSelection",
+          "group": "navigation",
+          "when": "editorHasSelection && (resourceLangId == typescript || resourceLangId == javascript || resourceLangId == html || resourceLangId == angular-html)"
+        },
+        {
+          "command": "angularTranslation.reverseFromFile",
+          "group": "navigation",
+          "when": "!editorHasSelection && (resourceLangId == typescript || resourceLangId == javascript || resourceLangId == html || resourceLangId == angular-html)"
         }
       ],
       "editor/title": [
