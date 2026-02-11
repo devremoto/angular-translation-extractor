@@ -11,7 +11,7 @@
   },
   "icon": "assets/angular.ico",
   "description": "Extracts Angular app strings from JS/TS/HTML, generates per-file locale JSONs and translation loader artifacts.",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "AdilsondeAlmeidaPedro",
   "repository": {
     "type": "git",
