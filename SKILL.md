@@ -48,6 +48,49 @@ Two file generation strategies controlled by `singleFilePerLanguage`:
    - Localized files next to each component
    - Can become complex for large projects
 
+### Translation Key Structure
+
+**IMPORTANT**: Understanding how translation keys are built is critical for finding the relationship between source files and JSON translation files.
+
+Translation keys follow a **three-part structure**:
+
+```
+[FOLDER_PATH].[FILE_NAME].[TRANSLATION_TEXT]
+```
+
+#### Example Breakdown
+
+Given the key: `APP.SHARED.COMPONENTS.STATUS_MODAL.STATUS_MODAL_COMPONENT.CLOSE`
+
+1. **Folder Path**: `APP.SHARED.COMPONENTS.STATUS_MODAL`
+   - Represents the directory structure from `srcDir` to the file
+   - Each folder is converted to uppercase with underscores
+   - Segments are joined with dots (`.`)
+
+2. **File Name**: `STATUS_MODAL_COMPONENT`
+   - The filename (without extension) converted to uppercase with underscores
+   - For `status-modal.component.ts` or `status-modal.component.html`
+
+3. **Translation Text**: `CLOSE`
+   - The actual text being translated, normalized to uppercase with underscores
+   - Original text like "Close" becomes "CLOSE"
+
+#### Key Generation Rules
+
+From the file path (e.g., `src/app/shared/components/status-modal/status-modal.component.ts`):
+
+1. **Extract relative path**: `app/shared/components/status-modal/status-modal.component.ts`
+2. **Remove extension**: `app/shared/components/status-modal/status-modal.component`
+3. **Convert to uppercase**: `APP/SHARED/COMPONENTS/STATUS_MODAL/STATUS_MODAL.COMPONENT`
+4. **Replace non-alphanumeric with underscores**: `APP_SHARED_COMPONENTS_STATUS_MODAL_STATUS_MODAL_COMPONENT`
+5. **Join path segments with dots**: `APP.SHARED.COMPONENTS.STATUS_MODAL.STATUS_MODAL_COMPONENT`
+6. **Append normalized text**: `APP.SHARED.COMPONENTS.STATUS_MODAL.STATUS_MODAL_COMPONENT.CLOSE`
+
+This hierarchical structure makes it easy to:
+- Locate which file a translation key belongs to
+- Organize translations logically in the JSON structure
+- Reverse translate keys back to original strings
+
 ### Update Modes
 
 Controlled by `updateMode` setting:
@@ -86,6 +129,12 @@ Controlled by `updateMode` setting:
 - If `onlyMainLanguages: false` → look for `en-US.json`
 - If `onlyMainLanguages: true` → look for `en.json`
 - Must read languages JSON to find the actual default language code
+
+**Understanding Key Structure for Reverse Translation**:
+The reverse translation feature relies on the translation key structure (`[FOLDER_PATH].[FILE_NAME].[TRANSLATION_TEXT]`) to map keys back to their original values. When reversing:
+- The key `APP.SHARED.COMPONENTS.STATUS_MODAL.STATUS_MODAL_COMPONENT.CLOSE` maps back to the original string "Close"
+- The folder path and file name components help locate which source files contain the translation keys
+- The translation text component is looked up in the default language JSON to retrieve the original string value
 
 ## Code Structure
 
