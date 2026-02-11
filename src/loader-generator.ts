@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import { readdirSync, existsSync } from "node:fs";
 import { LanguageEntry } from "./types";
 import { ensureDir } from "./utils";
+import { updateEnvironment } from "./updateEnvironment";
 
 export async function updateManifest(opts: {
   workspaceRoot: string;
@@ -37,6 +38,9 @@ const OUTPUT_ROOT = "${outputRoot}";
 const BASE_LANG = "${baseLocaleCode}";
 let EFFECTIVE_BASE_LANG = BASE_LANG;
 
+// Processing constants
+const MAX_CONCURRENT_REQUESTS = 15;
+
 // Extract main language code (e.g., "pt" from "pt-BR")
 function getMainLang(code) {
   return code.split("-")[0].toLowerCase();
@@ -50,80 +54,111 @@ const isFast = args.includes("--fast");
 const isDiff = args.includes("--diff");
 const isParallel = args.includes("--parallel");
 const isForce = args.includes("--force");
-const DEFAULT_DELAY = isFast ? 0 : 500;
+
+// Delay is managed inside the translation loop if needed, but google-translate.ts generally relies on axios await time.
+// If --fast is NOT passed, we can add small delay.
+const DEFAULT_DELAY = isFast ? 0 : 100;
 
 async function translateWithGoogle(text, targetLang) {
-  const params = new URLSearchParams({
-    client: "gtx",
-    sl: getMainLang(EFFECTIVE_BASE_LANG) || "auto",
-    tl: targetLang,
-    dt: "t",
-    q: text,
+  // Use specific language code for API calls
+  const apiTargetLang = targetLang;
+  const apiSourceLang = EFFECTIVE_BASE_LANG || "auto";
+
+  const encoded = encodeURIComponent(text);
+  // Using the same URL pattern as google-translate.ts
+  const url = \`https://translate.google.com/translate_a/single?client=gtx&sl=\${apiSourceLang}&tl=\${apiTargetLang}&dt=t&q=\${encoded}\`;
+
+  const response = await axios.get(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
   });
 
-  const response = await axios.post(
-    \`https://translate.google.com/translate_a/single?\${params}\`,
-    {},
-    {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
+  if (response.data && Array.isArray(response.data) && response.data[0] && Array.isArray(response.data[0])) {
+    const translationPairs = response.data[0];
+    let translated = "";
+    for (const pair of translationPairs) {
+        if (Array.isArray(pair) && pair[0]) {
+            translated += pair[0];
+        }
     }
-  );
-
-  if (Array.isArray(response.data) && response.data[0]) {
-    return response.data[0][0][0];
+    if (translated.length === 0 || translated === text) {
+        // Fallback or error, simplistic string return
+        return text;
+    }
+    return translated;
   }
   return text;
 }
 
-async function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// Deeply collect translatable strings
+function collectStrings(obj, path = [], entries = []) {
+  for (const [key, value] of Object.entries(obj)) {
+    const currentPath = [...path, key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      entries.push({ path: currentPath, value });
+    } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      collectStrings(value, currentPath, entries);
+    }
+  }
+  return entries;
 }
 
-async function translateKeys(keysToTranslate, targetLang) {
-  if (isParallel) {
-    // Parallel translation with concurrency limit
-    const batchSize = 5;
-    const results = {};
-    for (let i = 0; i < keysToTranslate.length; i += batchSize) {
-      const batch = keysToTranslate.slice(i, i + batchSize);
-      const promises = batch.map(async ([key, value]) => {
-        try {
-          const translated = await translateWithGoogle(value, targetLang);
-          results[key] = translated;
-          if (DEFAULT_DELAY > 0) await sleep(DEFAULT_DELAY);
-        } catch (error) {
-          console.error(\`  ❌ Error translating "\${key}": \${error.message}\`);
-          results[key] = value;
-        }
-      });
-      await Promise.all(promises);
+// Check nested existence using path array
+function getDeepValue(obj, path) {
+  let current = obj;
+  for (const key of path) {
+    if (current && typeof current === 'object') {
+      current = current[key];
+    } else {
+      return undefined;
     }
-    return results;
-  } else {
-    // Sequential translation (default)
-    const results = {};
-    for (const [key, value] of keysToTranslate) {
-      try {
-        const translated = await translateWithGoogle(value, targetLang);
-        results[key] = translated;
-        if (DEFAULT_DELAY > 0) await sleep(DEFAULT_DELAY);
-      } catch (error) {
-        console.error(\`  ❌ Error translating "\${key}": \${error.message}\`);
-        results[key] = value;
-      }
-    }
-    return results;
   }
+  return current;
 }
+
+// Robust parallel limit implementation matching the Typescript source
+async function robustParallelLimit(items, limit, fn) {
+    return new Promise((resolve, reject) => {
+        let active = 0;
+        let index = 0;
+        const results = new Array(items.length);
+        
+        const next = () => {
+            if (index >= items.length && active === 0) {
+                resolve(results);
+                return;
+            }
+            
+            while (active < limit && index < items.length) {
+                const currentIndex = index++;
+                active++;
+                fn(items[currentIndex]).then(res => {
+                    results[currentIndex] = res;
+                    active--;
+                    next();
+                }).catch(err => {
+                    // For translation, we usually swallow error and return original
+                    // or construct error result
+                    // For now, let's assume we want to proceed
+                    results[currentIndex] = { entry: items[currentIndex], translatedText: items[currentIndex].value, error: err };
+                    active--;
+                    next();
+                });
+            }
+        };
+        
+        next();
+    });
+}
+
+// Sleep helper
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function main() {
   console.log("🌐 Starting Google Translate...");
   if (isDiff) console.log("📋 Diff mode - showing what would be translated\\n");
   if (isFast) console.log("⚡ Fast mode - no delays between requests\\n");
-  if (isParallel) console.log("🚀 Parallel mode - translate up to 5 languages at once\\n");
   if (isForce) console.log("💪 Force mode - overwriting existing translations\\n");
 
   // Find all base language JSON files
@@ -131,197 +166,8 @@ async function main() {
     ignore: ["**/translate-manifest.json"],
   });
 
-      const hasBaseLang = baseFiles.some(
-        (file) => path.basename(file).replace(".json", "") === BASE_LANG
-      );
-      const hasMainBaseLang = baseFiles.some(
-        (file) => path.basename(file).replace(".json", "") === BASE_LANG_MAIN
-      );
-
-      if (!hasBaseLang && hasMainBaseLang) {
-        EFFECTIVE_BASE_LANG = BASE_LANG_MAIN;
-      }
-
-      const baseLanguageFiles = baseFiles.filter(
-        (file) => path.basename(file).replace(".json", "") === EFFECTIVE_BASE_LANG
-      );
-
-  if (baseLanguageFiles.length === 0) {
-    console.log(\`❌ No \${EFFECTIVE_BASE_LANG}.json files found in \${OUTPUT_ROOT}\`);
-    process.exit(1);
-  }
-
-  console.log(\`📁 Found \${baseLanguageFiles.length} base language file(s)\`);
-
-  // Get target languages from manifest
-  const manifestPath = path.join(OUTPUT_ROOT, "translate-manifest.json");
-  if (!fs.existsSync(manifestPath)) {
-    console.log("❌ translate-manifest.json not found");
-    process.exit(1);
-  }
-
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-  const allLanguages = Object.keys(manifest.locales || {});
-      const targetLanguages = allLanguages.filter((code) => code !== EFFECTIVE_BASE_LANG).map((code) => ({ code }));
-
-  console.log(\`🎯 Target languages: \${targetLanguages.map((l) => l.code).join(", ")}\`);
-
-  let totalTranslated = 0;
-
-  for (const baseFile of baseLanguageFiles) {
-    console.log(\`\\n📄 Processing: \${baseFile}\`);
-    const baseDir = path.dirname(baseFile);
-    const content = JSON.parse(fs.readFileSync(baseFile, "utf-8"));
-
-    for (const targetLang of targetLanguages) {
-      const targetFile = path.join(baseDir, \`\${targetLang.code}.json\`);
-      const translations = fs.existsSync(targetFile)
-        ? JSON.parse(fs.readFileSync(targetFile, "utf-8"))
-        : {};
-
-      const keysToTranslate = Object.entries(content).filter(
-        ([key, value]) => isForce || !translations[key] || (typeof translations[key] === 'string' && translations[key].trim() === '')
-      );
-
-      if (keysToTranslate.length === 0) {
-        console.log(\`  ✓ \${targetLang.code}: all keys translated\`);
-        continue;
-      }
-
-      console.log(\`  → \${targetLang.code}: \${keysToTranslate.length} key(s) to translate\`);
-      
-      if (isDiff) {
-        // Show what would be translated
-        keysToTranslate.forEach(([key, value]) => {
-          console.log(\`    • "\${key}": "\${value}"\`);
-        });
-        continue;
-      }
-
-      // Extract main language code for translation API (e.g., "pt" from "pt-BR")
-      const mainLang = getMainLang(targetLang.code);
-      const results = await translateKeys(keysToTranslate, mainLang);
-      Object.assign(translations, results);
-
-      fs.writeFileSync(targetFile, JSON.stringify(translations, null, 2) + "\\n");
-      totalTranslated += keysToTranslate.length;
-      console.log(\`  ✅ \${targetLang.code}: saved\`);
-    }
-  }
-
-  if (isDiff) {
-    console.log("\\n📋 Diff mode - use without --diff to apply translations");
-  } else {
-    console.log(\`\\n✅ Translation complete! (\${totalTranslated} keys translated)\`);
-  }
-}
-
-main().catch((error) => {
-  console.error("Fatal error:", error);
-  process.exit(1);
-});
-`;
-}
-
-export function getLibretranslateScript(outputRoot: string, baseLocaleCode: string): string {
-  return `const fs = require("fs");
-const path = require("path");
-const axios = require("axios");
-const glob = require("fast-glob");
-
-const OUTPUT_ROOT = "${outputRoot}";
-const BASE_LANG = "${baseLocaleCode}";
-let EFFECTIVE_BASE_LANG = BASE_LANG;
-const LIBRETRANSLATE_URL = "https://libretranslate.de/translate";
-
-// Extract main language code (e.g., "pt" from "pt-BR")
-function getMainLang(code) {
-  return code.split("-")[0].toLowerCase();
-}
-
-const BASE_LANG_MAIN = getMainLang(BASE_LANG);
-
-// Parse command line args
-const args = process.argv.slice(2);
-const isFast = args.includes("--fast");
-const isDiff = args.includes("--diff");
-const isParallel = args.includes("--parallel");
-const isForce = args.includes("--force");
-const DEFAULT_DELAY = isFast ? 0 : 500;
-
-async function translateWithLibretranslate(text, targetLang) {
-  const response = await axios.post(LIBRETRANSLATE_URL, {
-    q: text,
-    source: getMainLang(EFFECTIVE_BASE_LANG) || "auto",
-    target: targetLang,
-  });
-
-  if (response.data && response.data.translatedText) {
-    return response.data.translatedText;
-  }
-  return text;
-}
-
-async function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function translateKeys(keysToTranslate, targetLang) {
-  if (isParallel) {
-    // Parallel translation with concurrency limit
-    const batchSize = 5;
-    const results = {};
-    for (let i = 0; i < keysToTranslate.length; i += batchSize) {
-      const batch = keysToTranslate.slice(i, i + batchSize);
-      const promises = batch.map(async ([key, value]) => {
-        try {
-          const translated = await translateWithLibretranslate(value, targetLang);
-          results[key] = translated;
-          if (DEFAULT_DELAY > 0) await sleep(DEFAULT_DELAY);
-        } catch (error) {
-          console.error(\`  ❌ Error translating "\${key}": \${error.message}\`);
-          results[key] = value;
-        }
-      });
-      await Promise.all(promises);
-    }
-    return results;
-  } else {
-    // Sequential translation (default)
-    const results = {};
-    for (const [key, value] of keysToTranslate) {
-      try {
-        const translated = await translateWithLibretranslate(value, targetLang);
-        results[key] = translated;
-        if (DEFAULT_DELAY > 0) await sleep(DEFAULT_DELAY);
-      } catch (error) {
-        console.error(\`  ❌ Error translating "\${key}": \${error.message}\`);
-        results[key] = value;
-      }
-    }
-    return results;
-  }
-}
-
-async function main() {
-  console.log("⚠️  LibreTranslate has poor translation quality. Results may require manual review.");
-  console.log("🌐 Starting LibreTranslate...");
-  if (isDiff) console.log("📋 Diff mode - showing what would be translated\\n");
-  if (isFast) console.log("⚡ Fast mode - no delays between requests\\n");
-  if (isParallel) console.log("🚀 Parallel mode - translate up to 5 languages at once\\n");
-  if (isForce) console.log("💪 Force mode - overwriting existing translations\\n");
-
-  // Find all base language JSON files
-  const baseFiles = await glob(\`\${OUTPUT_ROOT}/**/*.json\`, {
-    ignore: ["**/translate-manifest.json"],
-  });
-
-  const hasBaseLang = baseFiles.some(
-    (file) => path.basename(file).replace(".json", "") === BASE_LANG
-  );
-  const hasMainBaseLang = baseFiles.some(
-    (file) => path.basename(file).replace(".json", "") === BASE_LANG_MAIN
-  );
+  const hasBaseLang = baseFiles.some(file => path.basename(file).replace(".json", "") === BASE_LANG);
+  const hasMainBaseLang = baseFiles.some(file => path.basename(file).replace(".json", "") === BASE_LANG_MAIN);
 
   if (!hasBaseLang && hasMainBaseLang) {
     EFFECTIVE_BASE_LANG = BASE_LANG_MAIN;
@@ -357,6 +203,9 @@ async function main() {
     console.log(\`\\n📄 Processing: \${baseFile}\`);
     const baseDir = path.dirname(baseFile);
     const content = JSON.parse(fs.readFileSync(baseFile, "utf-8"));
+    
+    // Collect specific strings via deep traversal
+    const baseEntries = collectStrings(content);
 
     for (const targetLang of targetLanguages) {
       const targetFile = path.join(baseDir, \`\${targetLang.code}.json\`);
@@ -364,9 +213,11 @@ async function main() {
         ? JSON.parse(fs.readFileSync(targetFile, "utf-8"))
         : {};
 
-      const keysToTranslate = Object.entries(content).filter(
-        ([key, value]) => isForce || !translations[key] || (typeof translations[key] === 'string' && translations[key].trim() === '')
-      );
+      // Filter: find entries that are missing or empty in target translations
+      const keysToTranslate = baseEntries.filter(entry => {
+         const existing = getDeepValue(translations, entry.path);
+         return isForce || !existing || (typeof existing === 'string' && existing.trim() === '');
+      });
 
       if (keysToTranslate.length === 0) {
         console.log(\`  ✓ \${targetLang.code}: all keys translated\`);
@@ -376,21 +227,300 @@ async function main() {
       console.log(\`  → \${targetLang.code}: \${keysToTranslate.length} key(s) to translate\`);
       
       if (isDiff) {
-        // Show what would be translated
-        keysToTranslate.forEach(([key, value]) => {
-          console.log(\`    • "\${key}": "\${value}"\`);
+        keysToTranslate.forEach(entry => {
+          console.log(\`    • "\${entry.path.join('.')}": "\${entry.value}"\`);
         });
         continue;
       }
 
-      // Extract main language code for translation API (e.g., "pt" from "pt-BR")
-      const mainLang = getMainLang(targetLang.code);
-      const results = await translateKeys(keysToTranslate, mainLang);
-      Object.assign(translations, results);
+      // Translate logic
+      let completed = 0;
+
+      // Use sequential or parallel based on args?
+      // google-translate.ts uses parallel by default with limit. 
+      // We'll stick to robustParallelLimit with MAX_CONCURRENT_REQUESTS.
+      
+      const results = await robustParallelLimit(
+        keysToTranslate, 
+        MAX_CONCURRENT_REQUESTS, 
+        async (entry) => {
+            let translatedText = entry.value;
+            try {
+                translatedText = await translateWithGoogle(entry.value, targetLang.code);
+            } catch(e) {
+                console.error(\`\n  ❌ Error translating "\${entry.value.substring(0,10)}...": \${e.message}\`);
+            }
+            completed++;
+            if (completed % 10 === 0 || completed === keysToTranslate.length) {
+                 process.stdout.write(\`\\r  ⏳ \${targetLang.code}: \${completed}/\${keysToTranslate.length}\`);
+            }
+            if (!isFast && DEFAULT_DELAY > 0) await sleep(DEFAULT_DELAY);
+            return { entry, translatedText };
+        }
+      );
+      console.log(""); // Newline after progress
+
+      // Merge results
+      let appliedCount = 0;
+      results.forEach(({entry, translatedText}) => {
+         if (!translatedText) return; // Should not happen with current logic, but safety first
+         if (translatedText !== entry.value) appliedCount++;
+         
+         // Set deep value
+         let current = translations;
+         for (let i = 0; i < entry.path.length - 1; i++) {
+             const key = entry.path[i];
+             if (!current[key] || typeof current[key] !== 'object') current[key] = {};
+             current = current[key];
+         }
+         current[entry.path[entry.path.length - 1]] = translatedText;
+      });
 
       fs.writeFileSync(targetFile, JSON.stringify(translations, null, 2) + "\\n");
-      totalTranslated += keysToTranslate.length;
-      console.log(\`  ✅ \${targetLang.code}: saved\`);
+      totalTranslated += appliedCount;
+      console.log(\`  ✅ \${targetLang.code}: saved (\${appliedCount} new)\`);
+    }
+  }
+
+  if (isDiff) {
+    console.log("\\n📋 Diff mode - use without --diff to apply translations");
+  } else {
+    console.log(\`\\n✅ Translation complete! (\${totalTranslated} keys translated)\`);
+  }
+}
+
+main().catch((error) => {
+  console.error("Fatal error:", error);
+  process.exit(1);
+});
+`;
+}
+
+export function getLibretranslateScript(outputRoot: string, baseLocaleCode: string): string {
+  return `const fs = require("fs");
+const path = require("path");
+const axios = require("axios");
+const glob = require("fast-glob");
+
+const OUTPUT_ROOT = "${outputRoot}";
+const BASE_LANG = "${baseLocaleCode}";
+let EFFECTIVE_BASE_LANG = BASE_LANG;
+const LIBRETRANSLATE_URL = "https://libretranslate.de/translate";
+const MAX_CONCURRENT_REQUESTS = 10;
+
+// Extract main language code (e.g., "pt" from "pt-BR")
+function getMainLang(code) {
+  return code.split("-")[0].toLowerCase();
+}
+
+const BASE_LANG_MAIN = getMainLang(BASE_LANG);
+
+// Parse command line args
+const args = process.argv.slice(2);
+const isFast = args.includes("--fast");
+const isDiff = args.includes("--diff");
+const isForce = args.includes("--force");
+const DEFAULT_DELAY = isFast ? 0 : 500;
+
+async function translateWithLibretranslate(text, targetLang) {
+  // Use specific language code for API calls (fallback to main if needed in future, but trying specific first as per request)
+  const apiTargetLang = targetLang;
+  const apiSourceLang = EFFECTIVE_BASE_LANG || "auto";
+
+  try {
+      const response = await axios.post(LIBRETRANSLATE_URL, {
+        q: text,
+        source: apiSourceLang,
+        target: apiTargetLang,
+      }, {
+        timeout: 10000
+      });
+
+      if (response.data && response.data.translatedText) {
+        return response.data.translatedText;
+      }
+      return text;
+  } catch(err) {
+      if(err.response) {
+          throw new Error(\`Status \${err.response.status}: \${JSON.stringify(err.response.data)}\`);
+      }
+      throw err;
+  }
+}
+
+function collectStrings(obj, path = [], entries = []) {
+  for (const [key, value] of Object.entries(obj)) {
+    const currentPath = [...path, key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      entries.push({ path: currentPath, value });
+    } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      collectStrings(value, currentPath, entries);
+    }
+  }
+  return entries;
+}
+
+function getDeepValue(obj, path) {
+  let current = obj;
+  for (const key of path) {
+    if (current && typeof current === 'object') {
+      current = current[key];
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+}
+
+async function robustParallelLimit(items, limit, fn) {
+    return new Promise((resolve, reject) => {
+        let active = 0;
+        let index = 0;
+        const results = new Array(items.length);
+        
+        const next = () => {
+            if (index >= items.length && active === 0) {
+                resolve(results);
+                return;
+            }
+            
+            while (active < limit && index < items.length) {
+                const currentIndex = index++;
+                active++;
+                fn(items[currentIndex]).then(res => {
+                    results[currentIndex] = res;
+                    active--;
+                    next();
+                }).catch(err => {
+                    results[currentIndex] = { entry: items[currentIndex], translatedText: items[currentIndex].value, error: err }; 
+                    active--;
+                    next();
+                });
+            }
+        };
+        
+        next();
+    });
+}
+
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function main() {
+  console.log("⚠️  LibreTranslate has poor translation quality. Results may require manual review.");
+  console.log("🌐 Starting LibreTranslate...");
+  if (isDiff) console.log("📋 Diff mode - showing what would be translated\\n");
+  if (isFast) console.log("⚡ Fast mode - no delays between requests\\n");
+  if (isForce) console.log("💪 Force mode - overwriting existing translations\\n");
+
+  // Find all base language JSON files
+  const baseFiles = await glob(\`\${OUTPUT_ROOT}/**/*.json\`, {
+    ignore: ["**/translate-manifest.json"],
+  });
+
+  const hasBaseLang = baseFiles.some(file => path.basename(file).replace(".json", "") === BASE_LANG);
+  const hasMainBaseLang = baseFiles.some(file => path.basename(file).replace(".json", "") === BASE_LANG_MAIN);
+
+  if (!hasBaseLang && hasMainBaseLang) {
+    EFFECTIVE_BASE_LANG = BASE_LANG_MAIN;
+  }
+
+  const baseLanguageFiles = baseFiles.filter(
+    (file) => path.basename(file).replace(".json", "") === EFFECTIVE_BASE_LANG
+  );
+
+  if (baseLanguageFiles.length === 0) {
+    console.log(\`❌ No \${EFFECTIVE_BASE_LANG}.json files found in \${OUTPUT_ROOT}\`);
+    process.exit(1);
+  }
+
+  console.log(\`📁 Found \${baseLanguageFiles.length} base language file(s)\`);
+
+  // Get target languages from manifest
+  const manifestPath = path.join(OUTPUT_ROOT, "translate-manifest.json");
+  if (!fs.existsSync(manifestPath)) {
+    console.log("❌ translate-manifest.json not found");
+    process.exit(1);
+  }
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  const allLanguages = Object.keys(manifest.locales || {});
+  const targetLanguages = allLanguages.filter((code) => code !== EFFECTIVE_BASE_LANG).map((code) => ({ code }));
+
+  console.log(\`🎯 Target languages: \${targetLanguages.map((l) => l.code).join(", ")}\`);
+
+  let totalTranslated = 0;
+
+  for (const baseFile of baseLanguageFiles) {
+    console.log(\`\\n📄 Processing: \${baseFile}\`);
+    const baseDir = path.dirname(baseFile);
+    const content = JSON.parse(fs.readFileSync(baseFile, "utf-8"));
+    const baseEntries = collectStrings(content);
+
+    for (const targetLang of targetLanguages) {
+      const targetFile = path.join(baseDir, \`\${targetLang.code}.json\`);
+      const translations = fs.existsSync(targetFile)
+        ? JSON.parse(fs.readFileSync(targetFile, "utf-8"))
+        : {};
+
+      const keysToTranslate = baseEntries.filter(entry => {
+         const existing = getDeepValue(translations, entry.path);
+         return isForce || !existing || (typeof existing === 'string' && existing.trim() === '');
+      });
+
+      if (keysToTranslate.length === 0) {
+        console.log(\`  ✓ \${targetLang.code}: all keys translated\`);
+        continue;
+      }
+
+      console.log(\`  → \${targetLang.code}: \${keysToTranslate.length} key(s) to translate\`);
+      
+      if (isDiff) {
+        keysToTranslate.forEach(entry => {
+          console.log(\`    • "\${entry.path.join('.')}": "\${entry.value}"\`);
+        });
+        continue;
+      }
+
+      // Translate
+      let completed = 0;
+      const results = await robustParallelLimit(
+        keysToTranslate,
+        MAX_CONCURRENT_REQUESTS,
+        async (entry) => {
+            let translatedText = entry.value;
+            try {
+                translatedText = await translateWithLibretranslate(entry.value, targetLang.code);
+            } catch(e) {
+                console.error(\`\n  ❌ Error translating "\${entry.value.substring(0,10)}...": \${e.message}\`);
+            }
+            completed++;
+            if (completed % 10 === 0 || completed === keysToTranslate.length) {
+                 process.stdout.write(\`\\r  ⏳ \${targetLang.code}: \${completed}/\${keysToTranslate.length}\`);
+            }
+            if (!isFast && DEFAULT_DELAY > 0) await sleep(DEFAULT_DELAY);
+            return { entry, translatedText };
+        }
+      );
+      console.log(""); 
+
+      let appliedCount = 0;
+      results.forEach(({entry, translatedText}) => {
+         if (translatedText !== entry.value) appliedCount++;
+         
+         let current = translations;
+         for (let i = 0; i < entry.path.length - 1; i++) {
+             const key = entry.path[i];
+             if (!current[key] || typeof current[key] !== 'object') current[key] = {};
+             current = current[key];
+         }
+         current[entry.path[entry.path.length - 1]] = translatedText;
+      });
+
+      fs.writeFileSync(targetFile, JSON.stringify(translations, null, 2) + "\\n");
+      totalTranslated += appliedCount;
+      console.log(\`  ✅ \${targetLang.code}: saved (\${appliedCount} new)\`);
     }
   }
 
@@ -447,8 +577,12 @@ export async function generateLoaderArtifacts(opts: {
   updateMode: "merge" | "overwrite" | "recreate";
   onlyMainLanguages?: boolean;
   singleFilePerLanguage?: boolean;
+  enableTransalationCache?: boolean;
 }): Promise<{ loaderPath: string; readmePath: string; languageSelectorPath: string; packageJsonUpdated: boolean; packageJsonReason?: string }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, onlyMainLanguages, singleFilePerLanguage: _singleFilePerLanguage } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, onlyMainLanguages, singleFilePerLanguage: _singleFilePerLanguage, enableTransalationCache = false } = opts;
+
+  // Ensure environment is updated to support enabling cache
+  await updateEnvironment({ workspaceRoot, srcDir, enableTransalationCache });
 
   const translateDirAbs = path.join(workspaceRoot, srcDir, "translate");
   await ensureDir(translateDirAbs);
@@ -466,6 +600,7 @@ export async function generateLoaderArtifacts(opts: {
 import { TranslateLoader } from "@ngx-translate/core";
 import { forkJoin, Observable, of } from "rxjs";
 import { map, switchMap, catchError, tap } from "rxjs/operators";
+import { environment } from "../environments/environment";
 
 export type TgTranslations = Record<string, unknown>;
 
@@ -474,19 +609,22 @@ export class TgTranslationLoader implements TranslateLoader {
     private http: HttpClient,
     private prefix: string = "${outputRootRelative}",
     private suffix: string = ".json",
-    private manifestFile: string = "translate-manifest.json"
+    private manifestFile: string = "translate-manifest.json",
+    private cacheEnabled: boolean = typeof (environment as any).enableTransalationCache !== "undefined" ? (environment as any).enableTransalationCache : ${enableTransalationCache}
   ) {}
 
   public getTranslation(lang: string): Observable<TgTranslations> {
     const cacheKey = \`tg-translation-\${lang}\`;
     
     // Check sessionStorage cache first
-    const cached = sessionStorage.getItem(cacheKey);
-    if (cached) {
-      try {
-        return of(JSON.parse(cached));
-      } catch (err) {
-        console.warn(\`[TgTranslationLoader] Cache parse error, reloading: \${err}\`);
+    if (this.cacheEnabled) {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          return of(JSON.parse(cached));
+        } catch (err) {
+          console.warn(\`[TgTranslationLoader] Cache parse error, reloading: \${err}\`);
+        }
       }
     }
 
@@ -524,10 +662,12 @@ export class TgTranslationLoader implements TranslateLoader {
             const merged = chunks.reduce((acc, chunk) => deepMerge(acc, chunk), {} as TgTranslations);
             
             // Cache in sessionStorage
-            try {
-              sessionStorage.setItem(cacheKey, JSON.stringify(merged));
-            } catch (err) {
-              console.warn(\`[TgTranslationLoader] Warning: Could not cache translation: \${err}\`);
+            if (this.cacheEnabled) {
+              try {
+                sessionStorage.setItem(cacheKey, JSON.stringify(merged));
+              } catch (err) {
+                console.warn(\`[TgTranslationLoader] Warning: Could not cache translation: \${err}\`);
+              }
             }
             
             return merged;
@@ -569,6 +709,7 @@ This folder is auto-generated by the **Angular Translation Extractor** extension
 
 It contains:
 - \`tg-translate-loader.ts\` - An Angular HTTP loader that merges all locale JSON files into one object
+- \`tg-language-selector.component.ts\` - A standalone component to switch languages
 - \`readme.md\` - This file with usage and configuration guidance
 
 ## About the Extractor
@@ -645,6 +786,7 @@ Key settings:
 - \`i18nExtractor.autoTranslateDefaultLanguage\` - Translate the default language (default: \`false\`)
 - \`i18nExtractor.translationService\` - Choose \`"google"\` (default, recommended) or \`"libretranslate"\`
 - \`i18nExtractor.googleTranslateDelay\` - Delay between requests in milliseconds (default: \`500\`, minimum: \`100\`)
+- \`i18nExtractor.enableTransalationCache\` - Enable/disable \`sessionStorage\` caching. Controls \`environment.enableTransalationCache\` (default: \`false\`)
 
 #### How It Works
 
@@ -802,7 +944,29 @@ export class AppComponent {
   }
 }
 \`\`\`
+Using the Language Selector
 
+Import the standalone component and use it in your templates:
+
+\`\`\`typescript
+import { Component } from '@angular/core';
+import { LanguageSelectorComponent } from './translate/tg-language-selector.component';
+
+@Component({
+  selector: 'app-header',
+  standalone: true,
+  imports: [LanguageSelectorComponent],
+  template: \`
+    <nav>
+      <h1>My App</h1>
+      <tg-language-selector></tg-language-selector>
+    </nav>
+  \`
+})
+export class HeaderComponent {}
+\`\`\`
+
+## 
 ## Configuration Options
 
 The loader accepts the following options:
@@ -1055,9 +1219,9 @@ Run the command: **Angular Translation Extractor: Extract Strings** from the VS 
   await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
 
   // Generate language selector component
-  const selectorComponentPath = path.join(translateDirAbs, "language-selector.component.ts");
-  const selectorTemplatePath = path.join(translateDirAbs, "language-selector.component.html");
-  const selectorStylePath = path.join(translateDirAbs, "language-selector.component.css");
+  const selectorComponentPath = path.join(translateDirAbs, "tg-language-selector.component.ts");
+  const selectorTemplatePath = path.join(translateDirAbs, "tg-language-selector.component.html");
+  const selectorStylePath = path.join(translateDirAbs, "tg-language-selector.component.css");
 
   const selectorComponent = getLanguageSelectorComponent(outputRootRelative);
   const selectorTemplate = getLanguageSelectorTemplate();
@@ -1193,7 +1357,11 @@ async function shouldWriteFile(fileAbs: string, allowOverwrite: boolean): Promis
 }
 
 function getLanguageSelectorComponent(outputRootRelative: string): string {
-  return `import { Component, OnInit } from '@angular/core';
+  return `/* 
+ * This file is auto-generated by the Angular Translation Extractor extension.
+ * Any manual changes to this file may be lost when the extension runs again.
+ */
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TranslateService } from '@ngx-translate/core';
 import { HttpClient } from '@angular/common/http';
@@ -1209,11 +1377,11 @@ export interface Language {
 }
 
 @Component({
-  selector: 'app-language-selector',
+  selector: 'tg-language-selector',
   standalone: true,
   imports: [CommonModule],
-  templateUrl: './language-selector.component.html',
-  styleUrls: ['./language-selector.component.css']
+  templateUrl: './tg-language-selector.component.html',
+  styleUrls: ['./tg-language-selector.component.css']
 })
 export class LanguageSelectorComponent implements OnInit {
   languages: Language[] = [];
@@ -1345,7 +1513,6 @@ function getLanguageSelectorStyle(): string {
   return `.language-selector {
   position: relative;
   display: inline-block;
-  user-select: none;
   z-index: 1000;
 }
 

@@ -98,10 +98,48 @@ export async function extractFromJsTs(
         baseCol
       );
       found.push(...inlineFound);
+    },
+
+    // Extract strings from Class code
+    StringLiteral(path: any) {
+      if (processedTemplateNodes.has(path.node)) return;
+      if (inIgnoredContext(path)) return;
+      if (inControlFlowCondition(path)) return;
+
+      // Strict checking: Only extract if specifically in a message/display context
+      // or if it looks very much like a sentence (has spaces, starts with capital)
+      const text = path.node.value;
+      if (!isProbablyUserFacing(text, minLen)) return;
+
+      if (inMessageContext(path) || isHighConfidenceString(text)) {
+        add("js-string", text, path.node.loc);
+      }
+    },
+
+    TemplateLiteral(path: any) {
+      if (processedTemplateNodes.has(path.node)) return;
+      if (path.node.expressions.length > 0) return; // Skip complex template literals for now
+      if (inIgnoredContext(path)) return;
+      if (inControlFlowCondition(path)) return;
+
+      const text = path.node.quasis.map((q: any) => q.value.cooked).join("");
+      if (!isProbablyUserFacing(text, minLen)) return;
+
+      if (inMessageContext(path) || isHighConfidenceString(text)) {
+        add("js-template", text, path.node.loc);
+      }
     }
   });
 
   return found;
+}
+
+function isHighConfidenceString(t: string): boolean {
+  // Contains spaces and starts with capital letter = likely a sentence/label
+  if (/\s/.test(t) && /^[A-Z]/.test(t)) return true;
+  // Contains specific punctuation used in text
+  if (/[.!?]$/.test(t)) return true;
+  return false;
 }
 
 function getTemplateString(valueNode: any): string | null {
@@ -146,6 +184,24 @@ function inIgnoredContext(p: any): boolean {
   const parent = p.parent;
   const grand = p.parentPath?.parent?.node;
 
+  // STRICT RULE: Ignore ALL strings inside @Component decorator except for 'template' property
+  // We already handle 'template' property in the separate traversal pass, so we can ignore ALL of them here
+  const decorator = p.findParent?.((pp: any) => pp.isDecorator?.());
+  if (decorator) {
+    const expr = decorator.node.expression;
+    if (expr?.type === "CallExpression" && expr.callee?.type === "Identifier") {
+      const name = expr.callee.name;
+      // Block known Angular decorators that use metadata strings, not user content
+      if ([
+        "Component", "Directive", "Pipe", "NgModule", "Injectable",
+        "Input", "Output", "HostBinding", "HostListener",
+        "ViewChild", "ViewChildren", "ContentChild", "ContentChildren"
+      ].includes(name)) {
+        return true;
+      }
+    }
+  }
+
   if (p.parentPath?.isImportDeclaration?.() || p.parentPath?.isExportNamedDeclaration?.() || p.parentPath?.isExportAllDeclaration?.()) return true;
   if (p.parentPath?.isImportExpression?.() || p.parentPath?.isTSImportType?.()) return true;
   if (p.key === "source" && (parent?.type === "ImportDeclaration" || parent?.type === "ExportAllDeclaration" || parent?.type === "ExportNamedDeclaration")) {
@@ -175,6 +231,58 @@ function inIgnoredContext(p: any): boolean {
 
   // Ignore strings in import/export specifiers
   if (parent?.type === "ImportSpecifier" || parent?.type === "ExportSpecifier") return true;
+
+  // Specific Decorator checks:
+  // 1. @Component: Only strictly allow template property (handled by first pass visitor, so ignore all here)
+  // 2. @Injectable: Ignore providedIn
+  // 3. Any other decorator property that is NOT explicitly allowed/safe
+
+  // Find the ObjectProperty we are inside
+  const objectProp = p.findParent?.((pp: any) => pp.isObjectProperty?.());
+  if (objectProp) {
+    const keyName = objectProp.node.key?.name; // e.g. "selector", "template", "providedIn"
+
+    // Find if this ObjectProperty is inside a Decorator
+    const decorator = objectProp.findParent?.((pp: any) => pp.isDecorator?.());
+
+    if (decorator) {
+      const expression = decorator.node.expression;
+      if (expression?.type === "CallExpression") {
+        const calleeName = expression.callee?.name;
+
+        // Block @Component properties (template is handled elsewhere or processed already)
+        if (calleeName === "Component") {
+          // We ignore EVERYTHING inside @Component in this generic visitor
+          // valid 'template' strings should have been processed by the Decorator visitor pass
+          // or if it's a simple string template, we want to allow it ONLY if it is the template property.
+          // But since we use processedTemplateNodes to skip handled templates, 
+          // any other string here is likely selector, styles, etc.
+          // So we can safely ignore all.
+          return true;
+        }
+
+        // Block @Injectable providedIn
+        if (calleeName === "Injectable") {
+          return true;
+        }
+
+        // Block @NgModule declarations, imports, exports, providers, bootstrap
+        if (calleeName === "NgModule") {
+          return true;
+        }
+
+        // Block @Pipe name
+        if (calleeName === "Pipe") {
+          return true;
+        }
+
+        // Block @Directive selector
+        if (calleeName === "Directive") {
+          return true;
+        }
+      }
+    }
+  }
 
   return false;
 }
@@ -262,9 +370,15 @@ function inMessageContext(p: any): boolean {
       const propName = callee.property?.name;
       const objName = callee.object?.name;
 
-      // console.log, console.error, console.warn, console.info
-      if (objName === "console" && ["log", "error", "warn", "info", "debug", "trace", "assert"].includes(propName)) {
-        return true;
+      // DO NOT extract from console.* methods
+      if (objName === "console") {
+        return false;
+      }
+
+      // Also ignore common logging libraries/methods if identified
+      if (["log", "debug", "trace"].includes(propName)) {
+        // Simple heuristic: if method is just 'log', 'debug', or 'trace', assume it's developer-facing
+        return false;
       }
 
       // window.alert, window.confirm, window.prompt

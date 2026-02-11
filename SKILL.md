@@ -67,7 +67,8 @@ Controlled by `updateMode` setting:
   "i18nExtractor.singleFilePerLanguage": true,  // Single consolidated file vs per-file structure
   "i18nExtractor.srcDir": "src",
   "i18nExtractor.outputRoot": "src/assets/i18n",
-  "i18nExtractor.updateMode": "merge"  // merge | overwrite | recreate
+  "i18nExtractor.updateMode": "merge",  // merge | overwrite | recreate
+  "i18nExtractor.enableTransalationCache": false // Enable sessionStorage caching in loader
 }
 ```
 
@@ -153,6 +154,29 @@ this.translate.instant('KEY')
 this.[service].get('KEY')
 translate.get('KEY')
 ```
+
+## Extraction Rules
+
+### Template Extraction
+- **Files**: `.html` files and inline templates in `.ts` files
+- **Rule**: For `.ts` files, only extract strings from inline templates defined in `@Component({ template: "..." })`
+- **Pattern**: Handles `template:` property in `Component` decorator
+
+### Class Code Extraction
+- **Scope**: Extracts strings from TypeScript classes (components, services, etc.) using strict AST analysis.
+- **Strict Exclusions**:
+  - **Decorators**: Completely ignores strings inside `@Injectable`, `@NgModule`, `@Pipe`, `@Directive`.
+  - **Component Metadata**: Ignores `selector`, `styleUrls`, `templateUrl`, `providers`, `host`, `queries`, `inputs`, `outputs`.
+  - **Logging**: Ignores `console.log`, `console.error`, `console.warn`, `console.debug`, `console.trace`.
+  - **Logic**: Ignores logic flow conditions (`if`, `switch`, `for`, `while`), imports, exports.
+  - **Technical**: Ignores object keys, state/config objects, URLs, paths.
+- **Inclusions (Strict)**:
+  - **Explicit Message Context**: Arguments to `alert()`, `confirm()`, `prompt()`, `toast()`, `snackBar.open()`.
+  - **Display Properties**: Assignments to keys known to be user-facing (e.g., `title`, `label`, `message`, `placeholder`, `tooltip`, `header`, `errorMessage`, `buttonText`, `altText`, `ariaLabel`, `description`, `caption`, `hint`).
+  - **Template Assignments**: Properties assigned strings that appear to be sentences (Capitalized, spaces).
+- **Transformation**:
+  - Replaces string literal with `this.translate.instant('GENERATED.KEY')`
+  - Automatically injects `TranslateService` into the class if missing
 
 ## Auto-Translation
 

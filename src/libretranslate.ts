@@ -6,11 +6,11 @@ const MAX_CONCURRENT_REQUESTS = 10;
 
 async function translateText(text: string, targetLang: string, sourceLang?: string): Promise<string> {
     // Helper to extract main language (e.g. "en" from "en-US")
-    const toMain = (lang: string) => lang.split("-")[0].toLowerCase();
+    // const toMain = (lang: string) => lang.split("-")[0].toLowerCase();
 
-    // ALWAYS use main language code for API calls - LibreTranslate doesn't accept region codes like it-IT
-    const apiTargetLang = toMain(targetLang);
-    const apiSourceLang = sourceLang ? toMain(sourceLang) : "auto";
+    // Use specific language code for API calls to support variants like pt-BR
+    const apiTargetLang = targetLang;
+    const apiSourceLang = sourceLang || "auto";
 
     async function doTranslate(target: string): Promise<string> {
         // LibreTranslate free API endpoint (public instance)

@@ -110,9 +110,15 @@ function upsertHttpLoaderFactory(content: string, outputRootRelative: string, up
     // Matches: export function HttpLoaderFactory(...) [: ReturnType] { ... }
     const factoryRegex = /export\s+function\s+HttpLoaderFactory\s*\([^)]*\)(?:\s*:\s*\w+)?\s*\{(?:[^{}]|\{[^}]*\})*?\}\s*\n*/g;
 
-    // If merge mode and factory exists, keep it
-    if (updateMode === 'merge' && factoryRegex.test(content)) {
-        return content;
+    // Check if we need to force update (e.g. to migrate from MultiTranslateHttpLoader)
+    const existingMatch = factoryRegex.exec(content);
+    const existingFactory = existingMatch ? existingMatch[0] : null;
+
+    // If merge mode and factory exists, keep it UNLESS it's using the old MultiTranslateHttpLoader
+    if (updateMode === 'merge' && existingFactory) {
+        if (!existingFactory.includes("MultiTranslateHttpLoader")) {
+            return content;
+        }
     }
 
     const factoryBody = `export function HttpLoaderFactory(http: HttpClient): TranslateLoader {\n  return new TgTranslationLoader(http, "${outputRootRelative}");\n}\n`;

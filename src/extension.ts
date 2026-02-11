@@ -193,7 +193,8 @@ export function activate(context: vscode.ExtensionContext) {
         baseFiles: gen.baseFiles,
         updateMode: cfg.updateMode,
         onlyMainLanguages: cfg.onlyMainLanguages,
-        singleFilePerLanguage: cfg.singleFilePerLanguage
+        singleFilePerLanguage: cfg.singleFilePerLanguage,
+        enableTransalationCache: cfg.enableTransalationCache
       });
 
       output.appendLine(`[angular-i18n] Loader artifacts generated: ${loaderArtifacts.loaderPath}`);
@@ -206,13 +207,13 @@ export function activate(context: vscode.ExtensionContext) {
         output.appendLine(`[angular-i18n] ⚠ Could not update package.json: ${loaderArtifacts.packageJsonReason || 'unknown error'}`);
       }
 
-      // Update angular.json to include i18n assets
+      // Update angular.json to include i18n assets and environments
       try {
         await updateAngularJson({
           workspaceRoot: root,
           outputRoot: cfg.outputRoot
         });
-        output.appendLine(`[angular-i18n] ✓ Updated angular.json assets configuration`);
+        output.appendLine(`[angular-i18n] ✓ Updated angular.json assets`);
       } catch (err: unknown) {
         output.appendLine(`[angular-i18n] ⚠ Could not update angular.json: ${(err as Record<string, unknown>)?.message || String(err)}`);
       }

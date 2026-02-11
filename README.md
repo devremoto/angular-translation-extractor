@@ -280,9 +280,9 @@ The loader path is automatically generated based on your `i18nExtractor.outputRo
 Every extraction run also generates a ready-to-use **Language Selector Component** that provides a dropdown UI for switching languages:
 
 **Generated files:**
-- `src/translate/language-selector.component.ts` - Angular standalone component
-- `src/translate/language-selector.component.html` - Template with dropdown UI
-- `src/translate/language-selector.component.css` - Professional styles with dark mode support
+- `src/translate/tg-language-selector.component.ts` - Anguar standalone component
+- `src/translate/tg-language-selector.component.html` - Template with dropdown UI
+- `src/translate/tg-language-selector.component.css` - Professional styles with dark mode support
 
 ### Features
 
@@ -295,12 +295,12 @@ Every extraction run also generates a ready-to-use **Language Selector Component
 
 ### Usage Example
 
-The component is generated as a standalone component, so you can import and use it directly:
+The component is generated as a standalone component with the selector `tg-language-selector`. You can import and use it directly:
 
 ```typescript
 // In your app component or any standalone component
 import { Component } from '@angular/core';
-import { LanguageSelectorComponent } from './translate/language-selector.component';
+import { LanguageSelectorComponent } from './translate/tg-language-selector.component';
 
 @Component({
   selector: 'app-root',
@@ -309,7 +309,7 @@ import { LanguageSelectorComponent } from './translate/language-selector.compone
   template: `
     <header>
       <h1>My App</h1>
-      <app-language-selector></app-language-selector>
+      <tg-language-selector></tg-language-selector>
     </header>
     <router-outlet></router-outlet>
   `
@@ -376,6 +376,7 @@ Access settings via: **File → Preferences → Settings** (or `Ctrl+,`) → Sea
 | `i18nExtractor.mainTsPath` | `"{srcDir}/main.ts"` | Path to Angular main.ts (supports `{srcDir}` placeholder) |
 | `i18nExtractor.angularBootstrapStyle` | `"standalone"` | How to wire TranslateModule in main.ts (`standalone` or `module`) |
 | `i18nExtractor.updateMainTs` | `true` | If true, update main.ts to wire the translation loader |
+| `i18nExtractor.enableTransalationCache` | `false` | Enable/disable sessionStorage caching in the generated loader. Also updates environment files. |
 
 ### Language Generation Settings
 
@@ -704,13 +705,17 @@ const title = this.translateService.translate('COMPONENTS.PROFILE.USER_PROFILE')
 - Collision handling with automatic numeric suffixes
 
 ### Intelligent String Detection
-The extension **extracts**:
-- ✅ String literals: `"Hello World"`
+The extension uses advanced AST analysis to **extract**:
+- ✅ String literals in explicit display context: `"Hello World"`
 - ✅ Template literals (no expressions): `` `Welcome` ``
 - ✅ HTML text content: `<p>Content</p>`
 - ✅ HTML attribute values (configurable)
+- ✅ Explicit alerts/messages: `alert("Message")`, `confirm("Sure?")`
 
-The extension **ignores**:
+The extension **ignores** (Strict Filtering):
+- ❌ **Console logs**: `console.log(...)`, `console.error(...)`, `console.warn(...)`
+- ❌ **Decorators**: `@Component` selectors, `@Injectable`, `@Pipe`, `@Directive` metadata
+- ❌ **Logic**: Strings in `if`, `for`, `while`, `switch` statements
 - ❌ Import/export paths: `import x from "./file"`
 - ❌ Object keys: `{ name: "value" }`
 - ❌ State object literals: Values in objects named `*State` or assigned to `*state` variables
