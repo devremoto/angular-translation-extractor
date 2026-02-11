@@ -56,9 +56,9 @@ async function loadAndNormalizeLanguages(workspaceRoot: string, languagesJsonPat
       },
       {
         "rank": 4,
-        "code": "en-ES",
-        "englishName": "English (Spain)",
-        "nativeName": "English (Spain)",
+        "code": "es-ES",
+        "englishName": "Spanish (Spain)",
+        "nativeName": "Español (España)",
         "flag": "https://flagcdn.com/w40/es.png",
         "default": false,
         "active": true
