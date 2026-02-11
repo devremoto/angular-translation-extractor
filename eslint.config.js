@@ -36,7 +36,7 @@ export default [
                     varsIgnorePattern: '^_'
                 }
             ],
-            '@typescript-eslint/no-explicit-any': 'warn',
+            '@typescript-eslint/no-explicit-any': 'off',
             '@typescript-eslint/explicit-module-boundary-types': 'off',
             '@typescript-eslint/no-non-null-assertion': 'warn',
             'no-console': 'off',

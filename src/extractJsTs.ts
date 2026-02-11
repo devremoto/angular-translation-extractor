@@ -11,6 +11,16 @@ export async function extractFromJsTs(
   attributeNames: string[]
 ): Promise<FoundString[]> {
   const code = await fs.readFile(fileAbs, "utf8");
+  return extractFromJsTsContent(code, fileAbs, fileRelFromSrc, minLen, attributeNames);
+}
+
+export function extractFromJsTsContent(
+  code: string,
+  fileAbs: string,
+  fileRelFromSrc: string,
+  minLen: number,
+  attributeNames: string[]
+): FoundString[] {
   let ast: any;
 
   try {

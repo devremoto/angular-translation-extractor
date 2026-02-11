@@ -24,16 +24,20 @@
     "Other"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [
-    "onCommand:angularTranslation.extract",
-    "onCommand:angularTranslation.reverseFromFolder",
-    "onCommand:angularTranslation.reverseFromFile"
-  ],
+  "activationEvents": [],
   "contributes": {
     "commands": [
       {
         "command": "angularTranslation.extract",
         "title": "Angular: Extract translations"
+      },
+      {
+        "command": "angularTranslation.extractFile",
+        "title": "Angular: Extract translations (File)"
+      },
+      {
+        "command": "angularTranslation.extractSelection",
+        "title": "Angular: Extract translations (Selection)"
       },
       {
         "command": "angularTranslation.reverseFromFolder",
@@ -65,6 +69,11 @@
           "group": "navigation"
         },
         {
+          "command": "angularTranslation.extractFile",
+          "group": "navigation",
+          "when": "explorerResourceIsFolder == false && (resourceLangId == typescript || resourceLangId == html || resourceExtname == .ts || resourceExtname == .html)"
+        },
+        {
           "command": "angularTranslation.reverseFromFolder",
           "group": "navigation",
           "when": "explorerResourceIsFolder"
@@ -73,6 +82,18 @@
           "command": "angularTranslation.reverseFromFile",
           "group": "navigation",
           "when": "explorerResourceIsFolder == false"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "angularTranslation.extractFile",
+          "group": "navigation",
+          "when": "resourceLangId == typescript || resourceLangId == html"
+        },
+        {
+          "command": "angularTranslation.extractSelection",
+          "group": "navigation",
+          "when": "editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
         }
       ],
       "editor/title": [
