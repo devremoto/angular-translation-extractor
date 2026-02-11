@@ -21,7 +21,25 @@
             "presentation": {
                 "reveal": "silent"
             },
-            "problemMatcher": "$tsc-watch"
+            "problemMatcher": [
+                {
+                    "owner": "esbuild",
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceFolder}"
+                    ],
+                    "pattern": {
+                        "regexp": "^✘ \\[ERROR\\] (.*)$",
+                        "message": 1
+                    },
+                    "background": {
+                        "activeOnStart": true,
+                        "beginsPattern": "^\\[watch\\] build started$",
+                        "endsPattern": "^\\[watch\\] build finished$"
+                    }
+                },
+                "$tsc-watch"
+            ]
         }
     ]
 }

@@ -28,14 +28,21 @@ export async function updateEnvironment(opts: {
     // If no environments found, try running the Angular schematic
     if (envFiles.length === 0) {
         try {
-            console.log("[updateEnvironment] No environment files found. Running 'ng generate environments'...");
-            // Try to use local ng/npx to generate environments
-            // This updates angular.json automatically
-            await execAsync("npx ng generate environments", { cwd: opts.workspaceRoot });
+            const angularJsonPath = path.join(opts.workspaceRoot, "angular.json");
+            const hasAngularJson = await fs.stat(angularJsonPath).then(() => true).catch(() => false);
 
-            // Re-scan directory to find the newly created files
-            const files = await fs.readdir(envDir);
-            envFiles = files.filter(f => f.startsWith("environment") && f.endsWith(".ts"));
+            if (hasAngularJson) {
+                console.log("[updateEnvironment] No environment files found. Running 'ng generate environments'...");
+                // Try to use local ng/npx to generate environments
+                // This updates angular.json automatically
+                await execAsync("npx ng generate environments", { cwd: opts.workspaceRoot });
+
+                // Re-scan directory to find the newly created files
+                const files = await fs.readdir(envDir);
+                envFiles = files.filter(f => f.startsWith("environment") && f.endsWith(".ts"));
+            } else {
+                console.log("[updateEnvironment] No environment files found and no angular.json detected. Skipping schematic.");
+            }
         } catch (err) {
             console.warn(`[updateEnvironment] 'ng generate environments' failed or skipped: ${err}`);
         }

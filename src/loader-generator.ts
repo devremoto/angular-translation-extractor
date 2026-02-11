@@ -515,15 +515,11 @@ Run the command: **Angular Translation Extractor: Extract Strings** from the VS 
   const selectorTemplate = getLanguageSelectorTemplate();
   const selectorStyle = getLanguageSelectorStyle();
 
-  if (await shouldWriteFile(selectorComponentPath, allowOverwrite)) {
-    await fs.writeFile(selectorComponentPath, selectorComponent, "utf8");
-  }
-  if (await shouldWriteFile(selectorTemplatePath, allowOverwrite)) {
-    await fs.writeFile(selectorTemplatePath, selectorTemplate, "utf8");
-  }
-  if (await shouldWriteFile(selectorStylePath, allowOverwrite)) {
-    await fs.writeFile(selectorStylePath, selectorStyle, "utf8");
-  }
+
+  await fs.writeFile(selectorComponentPath, selectorComponent, "utf8");
+  await fs.writeFile(selectorTemplatePath, selectorTemplate, "utf8");
+  await fs.writeFile(selectorStylePath, selectorStyle, "utf8");
+
 
   return {
     loaderPath,

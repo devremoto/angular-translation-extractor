@@ -300,9 +300,10 @@
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src --max-warnings=999",
     "test": "vscode-test",
-    "compile": "npm run check-types && node esbuild.js",
+    "clean": "rimraf dist out",
+    "compile": "npm run clean && npm run check-types && node esbuild.js",
     "check-types": "tsc --noEmit",
-    "watch": "npm-run-all -p watch:*",
+    "watch": "npm run clean && npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "vscode:prepublish": "npm run package",
@@ -317,12 +318,15 @@
     "esbuild": "^0.24.2",
     "eslint": "^9.39.2",
     "eslint-plugin-import": "^2.32.0",
+    "npm-run-all": "^4.1.5",
+    "rimraf": "^6.1.2",
     "typescript": "^5.4.0"
   },
   "dependencies": {
     "@babel/parser": "^7.24.0",
     "@babel/traverse": "^7.24.0",
-    "axios": "^1.6.0",
-    "fast-glob": "^3.3.2"
+    "axios": "^1.7.9",
+    "fast-glob": "^3.3.2",
+    "punycode": "^2.3.1"
   }
 }

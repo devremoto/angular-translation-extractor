@@ -29,17 +29,21 @@ export async function scanForStrings(opts: {
   const out: FoundString[] = [];
 
   for (const fileAbsPosix of files) {
-    const fileAbs = path.resolve(fileAbsPosix);
-    const relFromSrc = posixRel(srcAbs, fileAbs);
+    try {
+      const fileAbs = path.resolve(fileAbsPosix);
+      const relFromSrc = posixRel(srcAbs, fileAbs);
 
-    const ext = (path.extname(fileAbs).slice(1) || "").toLowerCase();
+      const ext = (path.extname(fileAbs).slice(1) || "").toLowerCase();
 
-    if (ext === "html") {
-      const strings = await extractFromHtml(fileAbs, relFromSrc, cfg.minStringLength, cfg.htmlAttributeNames);
-      out.push(...strings);
-    } else {
-      const strings = await extractFromJsTs(fileAbs, relFromSrc, cfg.minStringLength, cfg.htmlAttributeNames);
-      out.push(...strings);
+      if (ext === "html") {
+        const strings = await extractFromHtml(fileAbs, relFromSrc, cfg.minStringLength, cfg.htmlAttributeNames);
+        out.push(...strings);
+      } else {
+        const strings = await extractFromJsTs(fileAbs, relFromSrc, cfg.minStringLength, cfg.htmlAttributeNames);
+        out.push(...strings);
+      }
+    } catch (fileErr) {
+      console.error(`[scan] Error processing file ${fileAbsPosix}:`, fileErr);
     }
   }
 
