@@ -267,12 +267,18 @@ async function performAppConfiguration(
   }
 }
 
+interface ProcessOptions {
+  skipHeavyOps?: boolean;
+  skipReplacement?: boolean;
+  forceUpdateMode?: "merge" | "overwrite";
+}
+
 async function processLocalesAndArtifacts(
   root: string,
   cfg: ExtConfig,
   found: FoundString[],
   output: vscode.OutputChannel,
-  skipHeavyOps: boolean = false
+  options: ProcessOptions = {}
 ) {
   output.appendLine(`[angular-i18n] Reading locales list: ${cfg.languagesJsonPath}`);
   const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
@@ -308,19 +314,22 @@ async function processLocalesAndArtifacts(
     baseLocaleCode: baseLocaleCode,
     languages: generatedLangs,
     found,
-    updateMode: cfg.updateMode,
+    updateMode: options.forceUpdateMode ?? cfg.updateMode,
     onlyMainLanguages: cfg.onlyMainLanguages,
     singleFilePerLanguage: cfg.singleFilePerLanguage
   });
 
-  const replaceResult = await replaceExtractedStrings({
-    workspaceRoot: root,
-    found,
-    keyMapByFile: gen.keyMapByFile,
-    bootstrapStyle: cfg.angularBootstrapStyle
-  });
+  let replaceResult = { stringsReplaced: 0 };
+  if (!options.skipReplacement) {
+    replaceResult = await replaceExtractedStrings({
+      workspaceRoot: root,
+      found,
+      keyMapByFile: gen.keyMapByFile,
+      bootstrapStyle: cfg.angularBootstrapStyle
+    });
+  }
 
-  if (!skipHeavyOps) {
+  if (!options.skipHeavyOps) {
     const loaderArtifacts = await generateLoaderArtifacts({
       workspaceRoot: root,
       srcDir: cfg.srcDir,
@@ -328,7 +337,7 @@ async function processLocalesAndArtifacts(
       baseLocaleCode: baseLocaleCode,
       languages: generatedLangs,
       baseFiles: gen.baseFiles,
-      updateMode: cfg.updateMode,
+      updateMode: options.forceUpdateMode ?? cfg.updateMode,
       onlyMainLanguages: cfg.onlyMainLanguages,
       singleFilePerLanguage: cfg.singleFilePerLanguage,
       enableTransalationCache: cfg.enableTransalationCache,
@@ -351,6 +360,44 @@ async function processLocalesAndArtifacts(
   // I will leave it out of this helper for now to avoid complexity and only run it for full scan or explicit translate command.
 
   return { gen, replaceResult, generatedLangs, baseLocaleCode, langs };
+}
+
+async function runExtractionPipeline(
+  folder: vscode.WorkspaceFolder,
+  action: (root: string, cfg: ExtConfig, output: vscode.OutputChannel) => Promise<FoundString[]>,
+  options: ProcessOptions = {}
+) {
+  const root = folder.uri.fsPath;
+  const cfg = getConfig();
+  const output = vscode.window.createOutputChannel("Angular Translation Extractor");
+  output.show(true);
+
+  try {
+    output.appendLine(`[angular-i18n] Checking required npm packages...`);
+    const packagesOk = await ensurePackagesInstalled(root, output);
+    if (!packagesOk) {
+      output.appendLine(`[angular-i18n] ⚠ Warning: npm package installation may have failed. Continuing anyway...`);
+    }
+
+    const found = await action(root, cfg, output);
+    if (!found || found.length === 0) {
+      // Action itself might have logged "No strings found" or we do it here
+      return null;
+    }
+
+    const { gen, generatedLangs, baseLocaleCode } = await processLocalesAndArtifacts(root, cfg, found, output, options);
+
+    await executeAutoTranslate(cfg, root, baseLocaleCode, generatedLangs, gen.baseFiles, output);
+    await runNgBuild(root, output);
+
+    return { gen, generatedLangs, baseLocaleCode, output, root, cfg };
+
+  } catch (err: unknown) {
+    const msg = (err as Record<string, unknown>)?.message ? String((err as Record<string, unknown>).message) : String(err);
+    vscode.window.showErrorMessage(`Extraction failed: ${msg}`);
+    output.appendLine(`[angular-i18n] Failed ❌ ${msg}`);
+    throw err;
+  }
 }
 
 async function executeAutoTranslate(
@@ -467,63 +514,29 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const root = folders[0].uri.fsPath;
-    const cfg = getConfig();
-
-    const output = vscode.window.createOutputChannel("Angular Translation Extractor");
-    output.show(true);
-
-    try {
-      // Ensure required npm packages are installed
-      output.appendLine(`[angular-i18n] Checking required npm packages...`);
-      const packagesOk = await ensurePackagesInstalled(root, output);
-      if (!packagesOk) {
-        output.appendLine(`[angular-i18n] ⚠ Warning: npm package installation may have failed. Continuing anyway...`);
-      }
-
+    await runExtractionPipeline(folders[0], async (root, cfg, output) => {
       output.appendLine(`[angular-i18n] Scanning ${cfg.srcDir}/ (js/ts/html)...`);
       const found = await scanForStrings({ workspaceRoot: root, cfg });
       output.appendLine(`[angular-i18n] Found ${found.length} candidate strings.`);
+      return found;
+    });
 
-      const { gen, generatedLangs, baseLocaleCode } = await processLocalesAndArtifacts(root, cfg, found, output, false);
-
-      await executeAutoTranslate(cfg, root, baseLocaleCode, generatedLangs, gen.baseFiles, output);
-
-      await runNgBuild(root, output);
-
-      vscode.window.showInformationMessage("Angular translation extraction completed.");
-    } catch (err: unknown) {
-      const msg = (err as Record<string, unknown>)?.message ? String((err as Record<string, unknown>).message) : String(err);
-      vscode.window.showErrorMessage(`Angular translation extraction failed: ${msg}`);
-      output.appendLine(`[angular-i18n] Failed ❌ ${msg}`);
-    }
+    vscode.window.showInformationMessage("Angular translation extraction completed.");
   });
 
   const extractFileDisposable = vscode.commands.registerCommand("angularTranslation.extractFile", async (uri?: vscode.Uri) => {
     if (!uri) return;
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) return;
-    const root = folders[0].uri.fsPath;
-    const cfg = getConfig();
-    const output = vscode.window.createOutputChannel("Angular Translation Extractor");
-    output.show(true);
 
-    try {
-      // Ensure required npm packages are installed
-      output.appendLine(`[angular-i18n] Checking required npm packages...`);
-      const packagesOk = await ensurePackagesInstalled(root, output);
-      if (!packagesOk) {
-        output.appendLine(`[angular-i18n] ⚠ Warning: npm package installation may have failed. Continuing anyway...`);
-      }
-
+    await runExtractionPipeline(folders[0], async (root, cfg, output) => {
       const fileAbs = uri.fsPath;
       const srcAbs = path.join(root, cfg.srcDir);
       const relFromSrc = posixRel(srcAbs, fileAbs);
-
       output.appendLine(`[extractFile] Processing: ${relFromSrc}`);
 
-      let found: FoundString[] = [];
       const ext = path.extname(fileAbs).toLowerCase();
+      let found: FoundString[] = [];
 
       if (ext === ".html") {
         found = await extractFromHtml(fileAbs, relFromSrc, cfg.minStringLength, cfg.htmlAttributeNames);
@@ -533,21 +546,11 @@ export function activate(context: vscode.ExtensionContext) {
 
       if (found.length === 0) {
         output.appendLine(`[extractFile] No strings found in file.`);
-        return;
+      } else {
+        vscode.window.showInformationMessage(`Extracted ${found.length} strings from file.`);
       }
-
-      // We set skipHeavyOps to false to ensure main.ts and config are updated even for single file
-      // This ensures providers are present if this is the first time running extraction
-      const { gen, generatedLangs, baseLocaleCode } = await processLocalesAndArtifacts(root, cfg, found, output, false);
-
-      await executeAutoTranslate(cfg, root, baseLocaleCode, generatedLangs, gen.baseFiles, output);
-      await runNgBuild(root, output);
-
-      vscode.window.showInformationMessage(`Extracted ${found.length} strings from file.`);
-    } catch (e: unknown) {
-      const msg = (e as Error).message || String(e);
-      vscode.window.showErrorMessage(`Extraction failed: ${msg}`);
-    }
+      return found;
+    }, { skipHeavyOps: false }); // keep false to ensure config integrity
   });
 
   const extractSelectionDisposable = vscode.commands.registerCommand("angularTranslation.extractSelection", async () => {
@@ -558,116 +561,77 @@ export function activate(context: vscode.ExtensionContext) {
 
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) return;
-    const root = folders[0].uri.fsPath;
-    const cfg = getConfig();
 
     const fileAbs = editor.document.uri.fsPath;
-    const srcAbs = path.join(root, cfg.srcDir);
-    const fileRelFromSrc = posixRel(srcAbs, fileAbs);
     const ext = path.extname(fileAbs).toLowerCase();
 
-    let range = new vscode.Range(selection.start, selection.end);
-    let text = editor.document.getText(range);
-
-    // Prevent extraction inside <style> tags (in HTML or inline templates in TS/JS)
-    if (ext === ".html" || ext === ".ts" || ext === ".js") {
+    // Prevent extraction inside <style> tags
+    if ([".html", ".ts", ".js"].includes(ext)) {
       const docText = editor.document.getText();
       const selectionStart = editor.document.offsetAt(selection.start);
-      // Simple regex to find style blocks
       const styleRegex = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
       let match: RegExpExecArray | null;
       while ((match = styleRegex.exec(docText)) !== null) {
-        const styleStart = match.index;
-        const styleEnd = match.index + match[0].length;
-        // Check if selection overlaps with style block
-        if (selectionStart >= styleStart && selectionStart < styleEnd) {
+        if (selectionStart >= match.index && selectionStart < match.index + match[0].length) {
           vscode.window.showErrorMessage("Cannot extract text inside <style> tags.");
           return;
         }
       }
     }
 
-    // Handle TS/JS quotes expansion
-    if (ext === ".ts" || ext === ".js") {
-      const docText = editor.document.getText();
-      const startOffset = editor.document.offsetAt(selection.start);
-      const endOffset = editor.document.offsetAt(selection.end);
+    let range = new vscode.Range(selection.start, selection.end);
+    let startOffset = editor.document.offsetAt(selection.start);
+    let endOffset = editor.document.offsetAt(selection.end);
+    const docText = editor.document.getText();
 
-      if (startOffset > 0 && endOffset < docText.length) {
-        const charBefore = docText[startOffset - 1];
-        const charAfter = docText[endOffset];
-        if ((charBefore === "'" && charAfter === "'") ||
-          (charBefore === '"' && charAfter === '"') ||
-          (charBefore === '`' && charAfter === '`')) {
-          range = new vscode.Range(
-            editor.document.positionAt(startOffset - 1),
-            editor.document.positionAt(endOffset + 1)
-          );
-        }
+    // Check availability of quotes expansion
+    if ((ext === ".ts" || ext === ".js") && startOffset > 0 && endOffset < docText.length) {
+      const charBefore = docText[startOffset - 1];
+      const charAfter = docText[endOffset];
+      if (["'", '"', '`'].includes(charBefore) && charBefore === charAfter) {
+        range = new vscode.Range(editor.document.positionAt(startOffset - 1), editor.document.positionAt(endOffset + 1));
       }
     }
 
-    // Refresh text to the potentially expanded range to ensure we capture what is being replaced
-    // However, for the *content* (found.text), we might want to strip quotes if they exist,
-    // so that the generated key/value doesn't include them.
-    // If we expanded above, we captured quotes. If user selected quotes, we have quotes.
-    // We want `rawText` to HAVE quotes (for replacement), and `text` to NOT HAVE quotes (for extraction).
-
-    // Update rawText range
     const rawText = editor.document.getText(range);
-
-    // Logic to strip quotes from the text to be extracted
-    let extractedText = rawText;
-    const trimmed = extractedText.trim();
-    if (trimmed.length >= 2) {
-      const first = trimmed.charAt(0);
-      const last = trimmed.charAt(trimmed.length - 1);
-      if ((first === '"' && last === '"') ||
-        (first === "'" && last === "'") ||
-        (first === '`' && last === '`')) {
-        extractedText = trimmed.slice(1, -1);
+    let extractedText = rawText.trim();
+    // Strip surrounding quotes if present
+    if (extractedText.length >= 2) {
+      const first = extractedText[0];
+      const last = extractedText[extractedText.length - 1];
+      if (["'", '"', '`'].includes(first) && first === last) {
+        extractedText = extractedText.slice(1, -1);
       }
     }
 
-    // Check for inline template in TS files using ts-morph for robustness
     let kind = ext === ".html" ? "html-text" : "js-string";
+    // Check for inline template in TS files using ts-morph
     if (ext === ".ts" || ext === ".js") {
-      const docText = editor.document.getText();
       const selectionStart = editor.document.offsetAt(selection.start);
-
       try {
-        // Use ts-morph for reliable AST parsing
         const project = new Project({ useInMemoryFileSystem: true });
         const sourceFile = project.createSourceFile("temp.ts", docText);
+        const componentClass = sourceFile.getClasses().find(c => c.getDecorator("Component"));
 
         let componentDecoratorObject: any;
-        let componentDecoratorText: string | undefined;
-        const componentClass = sourceFile.getClasses().find(c => c.getDecorator("Component"));
         if (componentClass) {
           const decorator = componentClass.getDecorator("Component");
           const args = decorator?.getArguments();
           if (args && args.length > 0 && args[0].getKind() === SyntaxKind.ObjectLiteralExpression) {
             componentDecoratorObject = args[0];
-            componentDecoratorText = componentDecoratorObject.getText();
           }
         }
 
         if (componentDecoratorObject) {
           const templateProp = componentDecoratorObject.getProperty("template");
-          if (templateProp && templateProp.getKind() === SyntaxKind.PropertyAssignment) {
-            const assign = templateProp.asKind(SyntaxKind.PropertyAssignment);
-            const init = assign?.getInitializer();
+          if (templateProp?.getKind() === SyntaxKind.PropertyAssignment) {
+            const init = templateProp.asKind(SyntaxKind.PropertyAssignment)?.getInitializer();
             if (init) {
-              // getStart() is better than getPos() because it skips leading trivia (whitespace/comments)
-              // This is closer to where the "regex match" for the value would start
               const iStart = init.getStart();
               const iEnd = init.getEnd();
-
-              // Check if selection is strictly inside the template string (initializer)
               if (selectionStart >= iStart && selectionStart < iEnd) {
                 const k = init.getKind();
-                // Accept simple strings, template literals (backticks), or template expressions
-                if (k === SyntaxKind.StringLiteral || k === SyntaxKind.NoSubstitutionTemplateLiteral || k === SyntaxKind.TemplateExpression) {
+                if ([SyntaxKind.StringLiteral, SyntaxKind.NoSubstitutionTemplateLiteral, SyntaxKind.TemplateExpression].includes(k)) {
                   kind = "html-text";
                 }
               }
@@ -675,13 +639,13 @@ export function activate(context: vscode.ExtensionContext) {
           }
         }
       } catch (e) {
-        console.warn("ts-morph parse failed in extractSelection:", e);
+        console.warn("ts-morph check failed:", e);
       }
     }
 
     const found: FoundString = {
       fileAbs,
-      fileRelFromSrc,
+      fileRelFromSrc: posixRel(path.join(folders[0].uri.fsPath, getConfig().srcDir), fileAbs),
       kind: kind as "html-text" | "js-string",
       line: range.start.line + 1,
       column: range.start.character,
@@ -689,119 +653,35 @@ export function activate(context: vscode.ExtensionContext) {
       rawText: rawText
     };
 
-    try {
-      // Ensure required npm packages are installed
-      const output = vscode.window.createOutputChannel("Angular Translation Extractor");
-      output.show(true);
-      output.appendLine(`[angular-i18n] Checking required npm packages...`);
-      const packagesOk = await ensurePackagesInstalled(root, output);
-      if (!packagesOk) {
-        output.appendLine(`[angular-i18n] ⚠ Warning: npm package installation may have failed. Continuing anyway...`);
-      }
+    const result = await runExtractionPipeline(folders[0], async () => [found], {
+      skipReplacement: true,
+      forceUpdateMode: "merge"
+    });
 
-      // We use 'processLocalesAndArtifacts' parts manually to separate generation from replacement
-      const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
+    if (result) {
+      const keyMap = result.gen.keyMapByFile[fileAbs];
+      if (keyMap && keyMap[found.text]) {
+        const key = keyMap[found.text];
+        await editor.edit(editBuilder => {
+          const replacement = (kind === "html-text")
+            ? `{{ '${key}' | translate }}`
+            : `this.translate.instant('${key}')`;
+          editBuilder.replace(range, replacement);
+        });
+        await editor.document.save();
 
-      const defaultLang = normalizeLanguages(langs).find(l => l.default === true)?.code;
-      const baseLocaleCode = defaultLang ?? cfg.baseLocaleCode;
+        if (ext === ".ts") await ensureComponentStructure(fileAbs, result.cfg.angularBootstrapStyle);
+        else if (ext === ".html" && result.cfg.angularBootstrapStyle === "standalone") {
+          const potTs = fileAbs.replace(/\.html$/, ".ts");
+          await fs.access(potTs).then(() => addTranslateModuleImport(potTs, true)).catch(() => { });
+        }
 
-      const generatedLangs = langs.filter(lang => {
-        if (lang.active === true) return true;
-        if (lang.code === baseLocaleCode) return true;
-        if (!cfg.onlyGenerateActiveLangs) return true;
-        return false;
-      });
-
-      // Generate/Update JSONs only
-      const gen = await generatePerFileLocales({
-        workspaceRoot: root,
-        srcDir: cfg.srcDir,
-        outputRoot: cfg.outputRoot,
-        baseLocaleCode: baseLocaleCode,
-        languages: generatedLangs,
-        found: [found],
-        updateMode: "merge", // Always merge for single selection
-        onlyMainLanguages: cfg.onlyMainLanguages,
-        singleFilePerLanguage: cfg.singleFilePerLanguage
-      });
-
-      // Run auto-translate
-      await executeAutoTranslate(cfg, root, baseLocaleCode, generatedLangs, gen.baseFiles, output);
-
-      // Generate loader artifacts (including tg-language-selector)
-      const loaderArtifacts = await generateLoaderArtifacts({
-        workspaceRoot: root,
-        srcDir: cfg.srcDir,
-        outputRoot: cfg.outputRoot,
-        baseLocaleCode: baseLocaleCode,
-        languages: generatedLangs,
-        baseFiles: gen.baseFiles,
-        updateMode: "merge", // match the updateMode used in generatePerFileLocales for selection
-        onlyMainLanguages: cfg.onlyMainLanguages,
-        singleFilePerLanguage: cfg.singleFilePerLanguage,
-        enableTransalationCache: cfg.enableTransalationCache,
-        languagesJsonPath: cfg.languagesJsonPath
-      });
-
-      if (loaderArtifacts.packageJsonUpdated) {
-        output.appendLine(`[angular-i18n] ✓ Updated package.json scripts`);
-      }
-
-      // Calculate replacement
-      const keyMap = gen.keyMapByFile[fileAbs];
-      if (!keyMap || !keyMap[found.text]) {
+        // Re-run app config to secure everything
+        await performAppConfiguration(result.root, result.cfg, result.baseLocaleCode, result.output);
+        vscode.window.showInformationMessage(`Extracted '${extractedText}' to key '${key}'`);
+      } else {
         vscode.window.showErrorMessage("Could not generate key for selection.");
-        return;
       }
-      const key = keyMap[found.text];
-
-      // Apply replacement in Editor
-      await editor.edit(editBuilder => {
-        let replacement = "";
-        // Use 'kind' to determine replacement syntax. 
-        // This covers both .html files and inline templates in .ts files (where kind was detected as "html-text").
-        if (kind === "html-text") {
-          replacement = `{{ '${key}' | translate }}`;
-        } else {
-          replacement = `this.translate.instant('${key}')`; // Default assumption: inside class method
-          // TODO: Could try to detect if we are in template literal or static context?
-          // For now, this is the safe standard.
-        }
-        editBuilder.replace(range, replacement);
-      });
-
-      // Save to disk to ensure ensureComponentStructure works on latest content
-      await editor.document.save();
-
-      // Ensure Angular component has proper imports/injections
-      if (ext === ".ts") {
-        await ensureComponentStructure(fileAbs, cfg.angularBootstrapStyle);
-      } else if (ext === ".html") {
-        // Try to find companion .ts
-        const potentialTs = fileAbs.replace(/\.html$/, ".ts");
-        try {
-          // If TS exists: 
-          // 1. Check if we need TranslateModule (only if standalone)
-          // 2. We don't need TranslateService injection for pipe usage in HTML
-          if (cfg.angularBootstrapStyle === "standalone") {
-            await fs.access(potentialTs);
-            await addTranslateModuleImport(potentialTs, true);
-          }
-        } catch {
-          // No companion TS found
-        }
-      }
-
-      // Ensure application configuration (angular.json, main.ts, environments) is correct
-      await performAppConfiguration(root, cfg, baseLocaleCode, output);
-
-      await runNgBuild(root, output);
-
-      vscode.window.showInformationMessage(`Extracted '${text}' to key '${key}'`);
-
-    } catch (e: unknown) {
-      const msg = (e as Error).message || String(e);
-      vscode.window.showErrorMessage(`Deep extraction failed: ${msg}`);
     }
   });
 
