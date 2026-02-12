@@ -23,6 +23,7 @@ import { captureConsoleLogs } from "./console-capture";
 import { reverseTranslateFileScope, reverseTranslateFolderScope, reverseTranslateSelectionScope } from './reverse';
 import { extractFromJsTs } from "./extractJsTs";
 import { extractFromHtml } from "./extractHtml";
+import { Project, SyntaxKind } from "ts-morph";
 
 
 
@@ -628,10 +629,60 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
+    // Check for inline template in TS files using ts-morph for robustness
+    let kind = ext === ".html" ? "html-text" : "js-string";
+    if (ext === ".ts" || ext === ".js") {
+      const docText = editor.document.getText();
+      const selectionStart = editor.document.offsetAt(selection.start);
+
+      try {
+        // Use ts-morph for reliable AST parsing
+        const project = new Project({ useInMemoryFileSystem: true });
+        const sourceFile = project.createSourceFile("temp.ts", docText);
+
+        let componentDecoratorObject: any;
+        let componentDecoratorText: string | undefined;
+        const componentClass = sourceFile.getClasses().find(c => c.getDecorator("Component"));
+        if (componentClass) {
+          const decorator = componentClass.getDecorator("Component");
+          const args = decorator?.getArguments();
+          if (args && args.length > 0 && args[0].getKind() === SyntaxKind.ObjectLiteralExpression) {
+            componentDecoratorObject = args[0];
+            componentDecoratorText = componentDecoratorObject.getText();
+          }
+        }
+
+        if (componentDecoratorObject) {
+          const templateProp = componentDecoratorObject.getProperty("template");
+          if (templateProp && templateProp.getKind() === SyntaxKind.PropertyAssignment) {
+            const assign = templateProp.asKind(SyntaxKind.PropertyAssignment);
+            const init = assign?.getInitializer();
+            if (init) {
+              // getStart() is better than getPos() because it skips leading trivia (whitespace/comments)
+              // This is closer to where the "regex match" for the value would start
+              const iStart = init.getStart();
+              const iEnd = init.getEnd();
+
+              // Check if selection is strictly inside the template string (initializer)
+              if (selectionStart >= iStart && selectionStart < iEnd) {
+                const k = init.getKind();
+                // Accept simple strings, template literals (backticks), or template expressions
+                if (k === SyntaxKind.StringLiteral || k === SyntaxKind.NoSubstitutionTemplateLiteral || k === SyntaxKind.TemplateExpression) {
+                  kind = "html-text";
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("ts-morph parse failed in extractSelection:", e);
+      }
+    }
+
     const found: FoundString = {
       fileAbs,
       fileRelFromSrc,
-      kind: ext === ".html" ? "html-text" : "js-string",
+      kind: kind as "html-text" | "js-string",
       line: range.start.line + 1,
       column: range.start.character,
       text: extractedText,
@@ -707,7 +758,9 @@ export function activate(context: vscode.ExtensionContext) {
       // Apply replacement in Editor
       await editor.edit(editBuilder => {
         let replacement = "";
-        if (ext === ".html") {
+        // Use 'kind' to determine replacement syntax. 
+        // This covers both .html files and inline templates in .ts files (where kind was detected as "html-text").
+        if (kind === "html-text") {
           replacement = `{{ '${key}' | translate }}`;
         } else {
           replacement = `this.translate.instant('${key}')`; // Default assumption: inside class method
