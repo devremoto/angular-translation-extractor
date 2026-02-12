@@ -1,48 +1,48 @@
 # Angular Translation Extractor - Architecture & Configuration
 
 ## Overview
+
 VS Code extension that extracts translatable strings from Angular applications (JS/TS/HTML), generates i18n JSON files, and can reverse translations back to original strings.
 
 ## Core Concepts
 
 ### Language Configuration
+
 The extension uses a **languages JSON file** (`languagesJsonPath`) that defines all supported languages with their properties:
 
 ```typescript
-type LanguageEntry = {
-  rank?: number;           // Sort order
-  code: string;            // Language code: "en-US", "pt-BR", etc.
-  englishName?: string;    // Auto-filled if missing
-  nativeName?: string;     // Auto-filled if missing  
-  flag?: string;           // Auto-filled if missing
-  default?: boolean;       // THE DEFAULT/BASE LANGUAGE SOURCE
-  active?: boolean;        // Whether to generate files for this language
-};
+type LanguageEntry =
+  {
+    rank?: number; // Sort order
+    code: string; // Language code: "en-US", "pt-BR", etc.
+    englishName?: string; // Auto-filled if missing
+    nativeName?: string; // Auto-filled if missing
+    flag?: string; // Auto-filled if missing
+    default?: boolean; // THE DEFAULT/BASE LANGUAGE SOURCE
+    active?: boolean; // Whether to generate files for this language
+  };
 ```
 
-**IMPORTANT**: The `default: true` property marks which language is the translation source, NOT the `baseLocaleCode` config!
+**IMPORTANT**: The `default: true` property marks which language is the translation source (this is the source of truth).
 
 ### File Naming Strategy
 
+- Files: `en-US.json`, `pt-BR.json`, `es-ES.json`
+- The loader maps full codes to main codes automatically
 
-  - Files: `en-US.json`, `pt-BR.json`, `es-ES.json`
-  - The loader maps full codes to main codes automatically
+### Key Construction Rule
 
- ### Key Construction Rule
-
-  - Keys are built following a strict structure: `[FOLDERS].[FILE_NAME].[KEY]`
-  - Example: `APP.SHARED.COMPONENTS.STATUS_MODAL.STATUS_MODAL_COMPONENT.CLOSE`
-    - Folder path: `APP.SHARED.COMPONENTS.STATUS_MODAL`
-    - File: `STATUS_MODAL_COMPONENT`
-    - Translation key: `CLOSE`
-   
+- Keys are built following a strict structure: `[FOLDERS].[FILE_NAME].[KEY]`
+- Example: `APP.SHARED.COMPONENTS.STATUS_MODAL.STATUS_MODAL_COMPONENT.CLOSE`
+  - Folder path: `APP.SHARED.COMPONENTS.STATUS_MODAL`
+  - File: `STATUS_MODAL_COMPONENT`
+  - Translation key: `CLOSE`
 
 ### Translation Mode
 
-1. **Single File Per Language** 
+1. **Single File Per Language**
    - One consolidated file per language in `outputRoot`: `en-US.json`, `pt-BR.json`
    - Better for large applications, easier to manage
-
 
 ### Update Modes
 
@@ -57,10 +57,14 @@ Controlled by `updateMode` setting:
 ```json
 {
   "i18nExtractor.languagesJsonPath": "src/app/core/json/language-code.json",
-  "i18nExtractor.baseLocaleCode": "en",  // Used for file naming convention
   "i18nExtractor.srcDir": "src",
   "i18nExtractor.outputRoot": "src/assets/i18n",
-  "i18nExtractor.updateMode": "merge",  // merge | overwrite | recreate
+  "i18nExtractor.updateMode": "merge", // merge | overwrite | recreate
+  "i18nExtractor.aggressiveMode": "moderate", // low | moderate | high
+  "i18nExtractor.aggressiveModeAllowCallRegex": [
+    "^alert\\s*\\(",
+    "^confirm\\s*\\("
+  ]
 }
 ```
 
@@ -69,11 +73,11 @@ Controlled by `updateMode` setting:
 **Purpose**: Convert translation keys back to original strings (useful for debugging, demos, or reverting changes)
 
 **How it works**:
+
 1. Loads translations from the **default language** JSON files (marked with `default: true`)
 2. Scans source files for i18n patterns: `{{ 'KEY' | translate }}`, `i18n('KEY')`, etc.
 3. Replaces translation keys with original string values
 4. Writes changes back to source files
-
 
 - Must read languages JSON to find the actual default language code
 
@@ -101,6 +105,7 @@ Controlled by `updateMode` setting:
 ## Important Functions
 
 ### Language Handling
+
 ```typescript
 // Get the default language from languages array
 getDefaultLanguageCode(langs: LanguageEntry[]): string | undefined
@@ -111,16 +116,19 @@ getMainLanguageCode(code: string): string
 // Normalize and auto-fill language metadata
 normalizeLanguages(entries: LanguageEntry[]): LanguageEntry[]
 ```
+
 ### Reverse Translation
+
 ```typescript
 loadTranslationKeyMap(outputRoot: string, baseLocaleCode: string): Promise<Map<string, string>>
-findI18nMatches(srcDir: string, keyMap: Map<string, string>, ignoreGlobs: string[]): Promise<ReversalMatch[]>  
+findI18nMatches(srcDir: string, keyMap: Map<string, string>, ignoreGlobs: string[]): Promise<ReversalMatch[]>
 applyReverseTranslations(matches: ReversalMatch[], outputChannel?): Promise<{ success, failed, errors }>
 ```
 
 ## Common Patterns
 
 ### Translation Key Patterns Detected
+
 ```typescript
 // Angular templates
 {{ 'KEY' | translate }}
@@ -130,7 +138,7 @@ applyReverseTranslations(matches: ReversalMatch[], outputChannel?): Promise<{ su
 // Parenthesized versions
 ('KEY' | translate)
 
-// TypeScript/JavaScript  
+// TypeScript/JavaScript
 i18n('KEY')
 this.translate.get('KEY')
 this.translate.instant('KEY')
@@ -141,11 +149,13 @@ translate.get('KEY')
 ## Extraction Rules
 
 ### Template Extraction
+
 - **Files**: `.html` files and inline templates in `.ts` files
 - **Rule**: For `.ts` files, only extract strings from inline templates defined in `@Component({ template: "..." })`
 - **Pattern**: Handles `template:` property in `Component` decorator
 
 ### Class Code Extraction
+
 - **Scope**: Extracts strings from TypeScript classes (components, services, etc.) using strict AST analysis.
 - **Strict Exclusions**:
   - **Decorators**: Completely ignores strings inside `@Injectable`, `@NgModule`, `@Pipe`, `@Directive`.
@@ -164,30 +174,43 @@ translate.get('KEY')
 ## Auto-Translation
 
 Controlled by:
+
 - `autoTranslate: true` - Enable automatic translation after extraction
 - `autoTranslateDefaultLanguage: false` - Skip translating the default language (it's the source!)
-- `translationService: "google" ` - Which service to use
 - `googleTranslateDelay: 500` - Rate limiting delay in ms
+
+## Aggressive Extraction Controls
+
+Controlled by:
+
+- `aggressiveMode: "moderate"` - Function-parameter extraction mode (`low` | `moderate` | `high`)
+- `aggressiveModeAllowCallRegex: []` - Regex array matched against full call source; matches override `aggressiveMode`
+- `aggressiveModeAllowContextRegex: []` - Regex array matched against function argument context; matches override `aggressiveMode`
+- Restricted strings are reported to `src/translate/aggressive-mode-restricted.json`
 
 ## Workspace vs User Settings
 
 Settings can be configured at:
+
 - **Workspace level**: `.vscode/settings.json` in project root (preferred for team consistency)
 - **User level**: Global VS Code settings (personal defaults)
 
 ## Development Notes
 
 ### Building
+
 - **esbuild**: Bundles to `dist/extension.js`
 - **TypeScript**: Compiler checks with `tsc --noEmit`
 - **ESLint**: Code quality checks
 
 ### Debugging
+
 - Extension loads from `package.json` `"main"` field → must match build output!
 - Launch config `outFiles` must match for breakpoints to work
 - Use "Extension Development Host" (F5) for testing
 
 ### Testing with Another Project
+
 1. Open this extension's folder in VS Code
 2. Press F5 to launch Extension Development Host
 3. In the new window, open the target Angular project
@@ -197,8 +220,9 @@ Settings can be configured at:
 ## Future AI Assistant Instructions
 
 **When working on this extension**:
+
 1. Always read `config.ts` to understand available configuration options
 2. Check `langMeta.ts` for language handling utilities
 3. Remember: `default: true` in languages JSON is the source of truth for base language
-5. Read the languages JSON file when you need to know the default language code
-6. Don't assume file names - they depend on configuration!
+4. Read the languages JSON file when you need to know the default language code
+5. Don't assume file names - they depend on configuration!

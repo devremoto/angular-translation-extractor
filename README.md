@@ -90,8 +90,8 @@ Create a JSON file (default: `src/app/core/json/language-code.json`) with your t
 **Field Descriptions:**
 
 - `code` (required) - Locale code (e.g., "en-US", "pt-BR")
-- `default` (optional) - Set to `true` to use as default language (overrides `baseLocaleCode` setting)
-- `active` (optional) - Set to `true` to generate JSON for this language 
+- `default` (optional) - Set to `true` to use as default/base source language
+- `active` (optional) - Set to `true` to generate JSON for this language
 - `rank` (optional) - Sort order for language selection UI
 - `englishName`, `nativeName`, `flag` (auto-generated) - Extension will fill these automatically
 
@@ -101,7 +101,7 @@ Open VS Code Settings (`Ctrl+,` or `Cmd+,`) and search for "Angular Translation 
 
 - Source directory to scan
 - Output directory for locale files
-- Base locale code
+- Default language from `languagesJsonPath` (`default: true`)
 - Minimum string length
 - HTML attributes to extract
 
@@ -256,25 +256,27 @@ const title = `User Profile`;
 
 You can configure the extension through VS Code settings (`settings.json`) or the Settings UI:
 
-| Setting ID                                   | Description                                             | Default                                                                                                                                                                                                                     |
-| -------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `i18nExtractor.srcDir`                       | Source folder to scan                                   | `src`                                                                                                                                                                                                                       |
-| `i18nExtractor.outputRoot`                   | Output folder for translations                          | `src/assets/i18n`                                                                                                                                                                                                           |
-| `i18nExtractor.languagesJsonPath`            | Path to your languages JSON file                        | `src/app/core/json/language-code.json`                                                                                                                                                                                      |
-| `i18nExtractor.baseLocaleCode`               | Base locale code (fallback)                             | `en`                                                                                                                                                                                                                        |
-| `i18nExtractor.minStringLength`              | Ignore strings shorter than this                        | `2`                                                                                                                                                                                                                         |
-| `i18nExtractor.ignoreGlobs`                  | Glob patterns to ignore                                 | `["**/*.test.*", "**/*.spec.*", "**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**", "**/.angular/**", "**/app.html", "**/index.html", "**/assets/**", "**/environments/**", "**/.agent/**", "**/.vscode/**"]` |
-| `i18nExtractor.skipGlobs`                    | Additional glob patterns to skip                        | `[]`                                                                                                                                                                                                                        |
-| `i18nExtractor.htmlAttributeNames`           | HTML attributes to extract                              | `["title", "alt", "placeholder", "aria-label", "aria-placeholder"]`                                                                                                                                                         |
-| `i18nExtractor.mainTsPath`                   | Path to `main.ts`                                       | `{srcDir}/main.ts`                                                                                                                                                                                                          |
-| `i18nExtractor.angularBootstrapStyle`        | `standalone` or `module`                                | `standalone`                                                                                                                                                                                                                |
-| `i18nExtractor.updateMode`                   | Source source updates: `merge`, `overwrite`, `recreate` | `merge`                                                                                                                                                                                                                     |
-| `i18nExtractor.autoTranslate`                | Automatically translate keys                            | `true`                                                                                                                                                                                                                      |
-| `i18nExtractor.autoTranslateDefaultLanguage` | Translate source language (usually false)               | `false`                                                                                                                                                                                                                     |
-| `i18nExtractor.googleTranslateDelay`         | Delay between translation API calls (ms)                | `500`                                                                                                                                                                                                                       |
-| `i18nExtractor.useTranslateCommand`          | Run custom command after extration                      | `false`                                                                                                                                                                                                                     |
-| `i18nExtractor.translateCommand`             | Custom translation command                              | `npx-translate`                                                                                                                                                                                                             |
-| `i18nExtractor.translateArgsTemplate`        | Arguments for custom command                            | `["--input", "{baseFile}", "--outDir", "{outDir}", "--from", "{baseLocale}", "--to", "{targetLocale}"]`                                                                                                                     |
+| Setting ID                                      | Description                                                                    | Default                                                                                                                                                                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `i18nExtractor.srcDir`                          | Source folder to scan                                                          | `src`                                                                                                                                                                                                                            |
+| `i18nExtractor.outputRoot`                      | Output folder for translations                                                 | `src/assets/i18n`                                                                                                                                                                                                                |
+| `i18nExtractor.languagesJsonPath`               | Path to your languages JSON file                                               | `src/app/core/json/language-code.json`                                                                                                                                                                                           |
+| `i18nExtractor.aggressiveMode`                  | Function-parameter extraction mode: `low`, `moderate`, `high`                  | `moderate`                                                                                                                                                                                                                       |
+| `i18nExtractor.aggressiveModeAllowCallRegex`    | Regex allowlist for full function-call source (priority over `aggressiveMode`) | `[^alert\\s*\\(, ^confirm\\s*\\(, ^prompt\\s*\\(]`                                                                                                                                                                               |
+| `i18nExtractor.aggressiveModeAllowContextRegex` | Regex allowlist for argument context (priority over `aggressiveMode`)          | `[^window\\.alert\\(arg#1\\)$, ^window\\.confirm\\(arg#1\\)$, ^window\\.prompt\\(arg#1\\)$]`                                                                                                                                     |
+| `i18nExtractor.minStringLength`                 | Ignore strings shorter than this                                               | `2`                                                                                                                                                                                                                              |
+| `i18nExtractor.ignoreGlobs`                     | Glob patterns to ignore                                                        | `["\*\*/*.test._", "\*\*/_.spec.\*", "**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**", "**/.angular/**", "**/app.html", "**/index.html", "**/assets/**", "**/environments/**", "**/.agent/**", "**/.vscode/**"]` |
+| `i18nExtractor.skipGlobs`                       | Additional glob patterns to skip                                               | `[]`                                                                                                                                                                                                                             |
+| `i18nExtractor.htmlAttributeNames`              | HTML attributes to extract                                                     | `["title", "alt", "placeholder", "aria-label", "aria-placeholder"]`                                                                                                                                                              |
+| `i18nExtractor.mainTsPath`                      | Path to`main.ts`                                                               | `{srcDir}/main.ts`                                                                                                                                                                                                               |
+| `i18nExtractor.angularBootstrapStyle`           | `standalone`or`module`                                                         | `standalone`                                                                                                                                                                                                                     |
+| `i18nExtractor.updateMode`                      | Source source updates:`merge`, `overwrite`, `recreate`                         | `merge`                                                                                                                                                                                                                          |
+| `i18nExtractor.autoTranslate`                   | Automatically translate keys                                                   | `true`                                                                                                                                                                                                                           |
+| `i18nExtractor.autoTranslateDefaultLanguage`    | Translate source language (usually false)                                      | `false`                                                                                                                                                                                                                          |
+| `i18nExtractor.googleTranslateDelay`            | Delay between translation API calls (ms)                                       | `500`                                                                                                                                                                                                                            |
+| `i18nExtractor.useTranslateCommand`             | Run custom command after extration                                             | `false`                                                                                                                                                                                                                          |
+| `i18nExtractor.translateCommand`                | Custom translation command                                                     | `npx-translate`                                                                                                                                                                                                                  |
+| `i18nExtractor.translateArgsTemplate`           | Arguments for custom command                                                   | `["--input", "{baseFile}", "--outDir", "{outDir}", "--from", "{baseLocale}", "--to", "{targetLocale}"]`                                                                                                                          |
 
 ### Language Configuration File
 
@@ -399,8 +401,6 @@ This loader is configured to load language files from your output directory.
 The generated loader includes intelligent language fallback:
 
 - Loads files named exactly as requested (e.g., `en-US.json`, `pt-BR.json`)
-
-
 
 This allows you to generate fewer files while supporting multiple regional variants:
 
@@ -533,29 +533,28 @@ Access settings via: **File → Preferences → Settings** (or `Ctrl+,`) → Sea
 
 ### Basic Settings
 
-| Setting                               | Default                                  | Description                                                                                                                                                                |
-| ------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `i18nExtractor.srcDir`                | `"src"`                                  | Folder to scan for source files (relative to workspace root)                                                                                                               |
-| `i18nExtractor.outputRoot`            | `"src/assets/I18n"`                      | Output root for generated locale JSONs                                                                                                                                     |
-| `i18nExtractor.languagesJsonPath`     | `"src/app/core/json/language-code.json"` | Path to languages list JSON file                                                                                                                                           |
-| `i18nExtractor.baseLocaleCode`        | `"en"`                                   | Base locale code (e.g., `"en"`, `"en-US"`, `"en-GB"`)                                                                                                                      |
-| `i18nExtractor.minStringLength`       | `2`                                      | Ignore strings shorter than this length                                                                                                                                    |
-| `i18nExtractor.updateMode`            | `"merge"`                                | Controls JSON file updates: `"merge"` (preserve translations, add new keys), `"overwrite"` (recreate non-default languages), `"recreate"` (recreate all including default) |
-| `i18nExtractor.mainTsPath`            | `"{srcDir}/main.ts"`                     | Path to Angular main.ts (supports `{srcDir}` placeholder)                                                                                                                  |
-| `i18nExtractor.angularBootstrapStyle` | `"standalone"`                           | How to wire TranslateModule in main.ts (`standalone` or `module`)                                                                                                          |
-| `i18nExtractor.updateMainTs`          | `true`                                   | If true, update main.ts to wire the translation loader                                                                                                                     |
+| Setting                                         | Default                                                                                      | Description                                                                                                                                                          |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `i18nExtractor.srcDir`                          | `"src"`                                                                                      | Folder to scan for source files (relative to workspace root)                                                                                                         |
+| `i18nExtractor.outputRoot`                      | `"src/assets/I18n"`                                                                          | Output root for generated locale JSONs                                                                                                                               |
+| `i18nExtractor.languagesJsonPath`               | `"src/app/core/json/language-code.json"`                                                     | Path to languages list JSON file                                                                                                                                     |
+| `i18nExtractor.aggressiveMode`                  | `"moderate"`                                                                                 | Function-parameter extraction mode: `"low"` blocks all, `"moderate"` allows multi-word or single-word > 10 chars, `"high"` allows all                                |
+| `i18nExtractor.aggressiveModeAllowCallRegex`    | `[^alert\\s*\\(, ^confirm\\s*\\(, ^prompt\\s*\\(]`                                           | Regex allowlist matched against full call source (example: `alert('teste')`). Matches have priority over `aggressiveMode`                                            |
+| `i18nExtractor.aggressiveModeAllowContextRegex` | `[^window\\.alert\\(arg#1\\)$, ^window\\.confirm\\(arg#1\\)$, ^window\\.prompt\\(arg#1\\)$]` | Regex allowlist matched against function argument context (example: `this.toastr.error(arg#1)`). Matches have priority over `aggressiveMode`                         |
+| `i18nExtractor.minStringLength`                 | `2`                                                                                          | Ignore strings shorter than this length                                                                                                                              |
+| `i18nExtractor.updateMode`                      | `"merge"`                                                                                    | Controls JSON file updates:`"merge"`(preserve translations, add new keys),`"overwrite"`(recreate non-default languages),`"recreate"`(recreate all including default) |
+| `i18nExtractor.mainTsPath`                      | `"{srcDir}/main.ts"`                                                                         | Path to Angular main.ts (supports`{srcDir}`placeholder)                                                                                                              |
+| `i18nExtractor.angularBootstrapStyle`           | `"standalone"`                                                                               | How to wire TranslateModule in main.ts (`standalone`or`module`)                                                                                                      |
+| `i18nExtractor.updateMainTs`                    | `true`                                                                                       | If true, update main.ts to wire the translation loader                                                                                                               |
 
 ### Language Generation Settings
 
-| Setting                                 | Default | Description                                                                                                                                                                                                                                                                      |
-| --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-
-
+| Setting | Default | Description |
+| ------- | ------- | ----------- |
 
 **Language Generation Examples:**
 
 - Generates: `en-US.json`, `en-GB.json`, `pt-BR.json`, `es-ES.json`
-
 
 ### Filtering Settings
 
@@ -915,15 +914,14 @@ The languages JSON file should contain an array of locale entries. Only `code` i
 
 **Field Descriptions:**
 
-| Field         | Required | Type    | Auto-generated | Description                                                                                                                                           |
-| ------------- | -------- | ------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `code`        | ✅ Yes   | string  | ❌ No          | Locale code (e.g., `"en-US"`, `"pt-BR"`)                                                                                                              |
-| `rank`        | ❌ No    | number  | ❌ No          | Sort order (lower ranks first)                                                                                                                        |
-| `englishName` | ❌ No    | string  | ✅ Yes         | English display name                                                                                                                                  |
-| `nativeName`  | ❌ No    | string  | ✅ Yes         | Native display name                                                                                                                                   |
-| `flag`        | ❌ No    | string  | ✅ Yes         | Flag emoji or icon URL                                                                                                                                |
-| `default`     | ❌ No    | boolean | ❌ No          | If true, use as default language (overrides `baseLocaleCode` config)                                                                                  |
-
+| Field         | Required | Type    | Auto-generated | Description                                  |
+| ------------- | -------- | ------- | -------------- | -------------------------------------------- |
+| `code`        | ✅ Yes   | string  | ❌ No          | Locale code (e.g., `"en-US"`, `"pt-BR"`)     |
+| `rank`        | ❌ No    | number  | ❌ No          | Sort order (lower ranks first)               |
+| `englishName` | ❌ No    | string  | ✅ Yes         | English display name                         |
+| `nativeName`  | ❌ No    | string  | ✅ Yes         | Native display name                          |
+| `flag`        | ❌ No    | string  | ✅ Yes         | Flag emoji or icon URL                       |
+| `default`     | ❌ No    | boolean | ❌ No          | If true, use as default/base source language |
 
 ## Features
 

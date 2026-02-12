@@ -132,7 +132,10 @@ You can configure the extension through VS Code settings (\`settings.json\`) or 
 | \`i18nExtractor.srcDir\` | Source folder to scan | \`src\` |
 | \`i18nExtractor.outputRoot\` | Output folder for translations | \`src/assets/i18n\` |
 | \`i18nExtractor.languagesJsonPath\` | Path to your languages JSON file | \`src/app/core/json/language-code.json\` |
-| \`i18nExtractor.baseLocaleCode\` | Base locale code (fallback) | \`en\` |
+| \`default: true\` in language JSON | Base/default source language | Required on one language entry |
+| \`i18nExtractor.aggressiveMode\` | Function-parameter extraction mode: \`low\`, \`moderate\`, \`high\` | \`moderate\` |
+| \`i18nExtractor.aggressiveModeAllowCallRegex\` | Regex allowlist matched against full call source (priority over \`aggressiveMode\`) | \`["^alert\\\\s*\\\\(", "^confirm\\\\s*\\\\(", "^prompt\\\\s*\\\\("]\` |
+| \`i18nExtractor.aggressiveModeAllowContextRegex\` | Regex allowlist matched against argument context (priority over \`aggressiveMode\`) | \`["^window\\\\.alert\\\\(arg#1\\\\)$", "^window\\\\.confirm\\\\(arg#1\\\\)$", "^window\\\\.prompt\\\\(arg#1\\\\)$"]\` |
 | \`i18nExtractor.minStringLength\` | Ignore strings shorter than this | \`2\` |
 | \`i18nExtractor.ignoreGlobs\` | Glob patterns to ignore | \`["**/*.test.*", "**/*.spec.*", "**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**", "**/.angular/**", "**/app.html", "**/index.html", "**/assets/**", "**/environments/**", "**/.agent/**", "**/.vscode/**"]\` |
 | \`i18nExtractor.skipGlobs\` | Additional glob patterns to skip | \`[]\` |
