@@ -33,28 +33,63 @@ export function extractFromHtmlContent(
   let m: RegExpExecArray | null;
   while ((m = textRe.exec(maskedHtml))) {
     const rawContent = m[1];
-    const text = decodeEntities(rawContent).trim();
-    if (!isProbablyUserFacing(text, minLen)) continue;
 
-    const leadingWsMatch = rawContent.match(/^\s*/);
-    const leadingWsLen = leadingWsMatch ? leadingWsMatch[0].length : 0;
-    const rawText = rawContent.trim();
+    // Split by interpolation {{...}} to extract mix of static text and dynamic content separately
+    // e.g. "Hello, {{ name }}" -> parts: ["Hello, ", (gap), ""]
+    const parts: { content: string; offset: number }[] = [];
 
-    // Calculate offset
-    const startOffset = m.index + 1 + leadingWsLen;
+    // Only split if we actually see start of interpolation
+    if (rawContent.includes('{{')) {
+      let lastIndex = 0;
+      const interpolationRe = /\{\{[\s\S]*?\}\}/g;
+      let interpMatch;
 
-    // Use original HTML for location to be safe (though maskedHtml has same newlines)
-    const { line, col } = locate(html, startOffset);
-    const adjusted = adjustLocation(line, col, baseLine, baseCol);
-    found.push({
-      fileAbs,
-      fileRelFromSrc,
-      line: adjusted.line,
-      column: adjusted.col,
-      text,
-      rawText,
-      kind: "html-text"
-    });
+      while ((interpMatch = interpolationRe.exec(rawContent)) !== null) {
+        // Text before interpolation
+        if (interpMatch.index > lastIndex) {
+          parts.push({
+            content: rawContent.substring(lastIndex, interpMatch.index),
+            offset: lastIndex
+          });
+        }
+        lastIndex = interpMatch.index + interpMatch[0].length;
+      }
+      // Text after last interpolation
+      if (lastIndex < rawContent.length) {
+        parts.push({
+          content: rawContent.substring(lastIndex),
+          offset: lastIndex
+        });
+      }
+    } else {
+      // No interpolation, check whole string
+      parts.push({ content: rawContent, offset: 0 });
+    }
+
+    for (const part of parts) {
+      const text = decodeEntities(part.content).trim();
+      if (!isProbablyUserFacing(text, minLen)) continue;
+
+      const leadingWsMatch = part.content.match(/^\s*/);
+      const leadingWsLen = leadingWsMatch ? leadingWsMatch[0].length : 0;
+      const rawText = part.content.trim();
+
+      // Calculate offset
+      const startOffset = m.index + 1 + part.offset + leadingWsLen;
+
+      // Use original HTML for location to be safe
+      const { line, col } = locate(html, startOffset);
+      const adjusted = adjustLocation(line, col, baseLine, baseCol);
+      found.push({
+        fileAbs,
+        fileRelFromSrc,
+        line: adjusted.line,
+        column: adjusted.col,
+        text,
+        rawText,
+        kind: "html-text"
+      });
+    }
   }
 
   const attrRe = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*("([^"]*)"|'([^']*)')/gms;

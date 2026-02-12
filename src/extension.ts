@@ -190,33 +190,23 @@ async function ensurePackagesInstalled(workspaceRoot: string, output: vscode.Out
     return true;
   }
 
-  const msg = `Missing required packages: ${missingPackages.join(", ")}. Install them now?`;
-  const result = await vscode.window.showWarningMessage(msg, "Install", "Ignore");
-
-  if (result === "Install") {
-    const installed = await installMissingPackages(workspaceRoot, missingPackages, output);
-    if (installed) {
-      // Re-check to verify they are actually there
-      const stillMissing = missingPackages.filter(p => !isPackageInstalled(p, workspaceRoot, output));
-      if (stillMissing.length > 0) {
-        output.appendLine(`[angular-i18n] ⚠ Installation task finished but packages still seem missing: ${stillMissing.join(", ")}`);
-        // We return true anyway to let the process try to continue, maybe fs check is cached or slow
-        return true;
-      }
-
-      output.appendLine(`[angular-i18n] ✓ Packages installed successfully.`);
+  const installed = await installMissingPackages(workspaceRoot, missingPackages, output);
+  if (installed) {
+    // Re-check to verify they are actually there
+    const stillMissing = missingPackages.filter(p => !isPackageInstalled(p, workspaceRoot, output));
+    if (stillMissing.length > 0) {
+      output.appendLine(`[angular-i18n] ⚠ Installation task finished but packages still seem missing: ${stillMissing.join(", ")}`);
+      // We return true anyway to let the process try to continue, maybe fs check is cached or slow
       return true;
-    } else {
-      output.appendLine(`[angular-i18n] ⚠ Installation failed.`);
-      vscode.window.showErrorMessage("Package installation failed. Check terminal for details.");
-      return false;
     }
+
+    output.appendLine(`[angular-i18n] ✓ Packages installed successfully.`);
+    return true;
+  } else {
+    output.appendLine(`[angular-i18n] ⚠ Installation failed.`);
+    vscode.window.showErrorMessage("Package installation failed. Check terminal for details.");
+    return false;
   }
-
-  output.appendLine(`[angular-i18n] ⚠ Could not verify installation of: ${missingPackages.join(", ")}`);
-  output.appendLine(`[angular-i18n] This warning is safe to ignore if you know they are installed or if you are in a non-standard environment.`);
-
-  return true;
 }
 
 async function performAppConfiguration(
