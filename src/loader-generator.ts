@@ -108,21 +108,6 @@ Google Translate provides **high-quality translations** using the same public AP
 - Rate limited (built-in delays prevent blocking)
 - May change their API without notice (though unlikely)
 
-#### Option 2: LibreTranslate (Alternative)
-
-LibreTranslate is an open-source translation service hosted in the cloud.
-
-**Pros:**
-- Free and open-source
-- No rate limiting concerns
-- Self-hostable if you need to
-- Good for low-volume translations
-
-**Cons:**
-- ⚠️ **Lower translation quality compared to Google Translate**
-- May produce awkward or grammatically incorrect translations
-- Recommended only if Google Translate is unavailable
-- Translations should be reviewed and corrected manually
 
 #### Configuration
 
@@ -131,15 +116,13 @@ Choose your translation service in VS Code settings:
 \`\`\`json
 {
   "i18nExtractor.autoTranslate": true,
-  "i18nExtractor.autoTranslateDefaultLanguage": false,
-  "i18nExtractor.translationService": "google"  // or "libretranslate"
+  "i18nExtractor.autoTranslateDefaultLanguage": false
 }
 \`\`\`
 
 Key settings:
 - \`i18nExtractor.autoTranslate\` - Enable/disable automatic translation (default: \`true\`)
 - \`i18nExtractor.autoTranslateDefaultLanguage\` - Translate the default language (default: \`false\`)
-- \`i18nExtractor.translationService\` - Choose \`"google"\` (default, recommended) or \`"libretranslate"\`
 - \`i18nExtractor.googleTranslateDelay\` - Delay between requests in milliseconds (default: \`500\`, minimum: \`100\`)
 
 ## Configuration Settings
@@ -164,7 +147,6 @@ You can configure the extension through VS Code settings (\`settings.json\`) or 
 | \`i18nExtractor.singleFilePerLanguage\` | Consolidate all strings into one file per language | \`true\` |
 | \`i18nExtractor.autoTranslate\` | Automatically translate keys | \`true\` |
 | \`i18nExtractor.autoTranslateDefaultLanguage\` | Translate source language (usually false) | \`false\` |
-| \`i18nExtractor.translationService\` | Service: \`google\` or \`libretranslate\` | \`google\` |
 | \`i18nExtractor.googleTranslateDelay\` | Delay between translation API calls (ms) | \`500\` |
 | \`i18nExtractor.useTranslateCommand\` | Run custom command after extration | \`false\` |
 | \`i18nExtractor.translateCommand\` | Custom translation command | \`npx-translate\` |
@@ -261,7 +243,7 @@ Base language file: src/assets/I18n/home/en.json
   "message": "Hello World"
 }
 
-↓ Translation Service (Google or LibreTranslate)
+↓ Translation Service (Google)
 
 Target files:
 - src/assets/I18n/home/pt.json → { "title": "Bem-vindo", "message": "Olá Mundo" }
@@ -284,11 +266,6 @@ The extension includes automatic rate limiting protection:
 - Can be used directly in applications
 - Minimal manual review needed
 
-**LibreTranslate:**
-- Generated translations may contain grammatical errors
-- Sentence structure may not be natural
-- **Always review and correct translations manually before using in production**
-- Good for quick previews or testing purposes
 
 #### Disabling Automatic Translation
 
@@ -322,11 +299,7 @@ If translations fail:
 1. Check your internet connection
 2. Increase the \`googleTranslateDelay\` setting (try \`1000\` or \`2000\` ms)
 3. Check the Output panel for detailed error messages
-4. If using LibreTranslate and it fails, switch back to Google Translate:
-   \`\`\`json
-   "i18nExtractor.translationService": "google"
-   \`\`\`
-5. For LibreTranslate quality issues, consider using Google Translate instead
+4. Retry extraction after a short delay if Google rate-limits requests
 
 ## What This Loader Does
 
@@ -467,7 +440,6 @@ Key settings:
 - \`i18nExtractor.autoTranslate\` - Automatically translate to target languages (default: \`true\`)
 - \`i18nExtractor.autoTranslateDefaultLanguage\` - Translate the default language (default: \`false\`)
 - \`i18nExtractor.outputRoot\` - Where to generate JSON files (default: \`"src/assets/I18n"\`)
-- \`i18nExtractor.translationService\` - Translation service to use: \`"google"\` (recommended) or \`"libretranslate"\` (lower quality)
 - \`i18nExtractor.googleTranslateDelay\` - Delay between translation requests in milliseconds (default: \`500\`)
 - \`i18nExtractor.onlyMainLanguages\` - Generate only main language codes like \`en\`, \`pt\` (default: \`false\`)
 - \`i18nExtractor.onlyGenerateActiveLangs\` - Only generate files for active languages (default: \`false\`)

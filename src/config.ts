@@ -18,7 +18,6 @@ export type ExtConfig = {
   onlyMainLanguages: boolean;
   autoTranslate: boolean;
   autoTranslateDefaultLanguage: boolean;
-  translationService: "google" | "libretranslate";
   googleTranslateDelay: number;
   singleFilePerLanguage: boolean;
 };
@@ -65,7 +64,6 @@ export function getConfig(): ExtConfig {
     onlyMainLanguages: cfg.get<boolean>("onlyMainLanguages", false),
     autoTranslate: cfg.get<boolean>("autoTranslate", true),
     autoTranslateDefaultLanguage: cfg.get<boolean>("autoTranslateDefaultLanguage", false),
-    translationService: cfg.get<"google" | "libretranslate">("translationService", "google"),
     googleTranslateDelay: cfg.get<number>("googleTranslateDelay", 500),
     singleFilePerLanguage: cfg.get<boolean>("singleFilePerLanguage", true),
   };

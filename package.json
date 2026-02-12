@@ -283,23 +283,14 @@
           "default": false,
           "description": "If false, skip translating the default language marked with 'default': true in i18n-languages.json. The default language is used as the translation source, so it typically doesn't need to be translated."
         },
-        "i18nExtractor.translationService": {
-          "type": "string",
-          "enum": [
-            "google",
-            "libretranslate"
-          ],
-          "default": "libretranslate",
-          "description": "Translation service to use for automatic translation. 'google' (recommended, higher quality) or 'libretranslate' (free but lower quality)."
-        },
         "i18nExtractor.googleTranslateDelay": {
           "type": "number",
           "default": 500,
-          "description": "Delay between translation requests in milliseconds to avoid rate limiting (minimum 100ms). Used for both Google Translate and LibreTranslate."
+          "description": "Delay between translation requests in milliseconds to avoid rate limiting (minimum 100ms). Used for Google Translate."
         },
         "i18nExtractor.singleFilePerLanguage": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "If true, generate a single file per language in the i18n root directory instead of per-file translations. All strings are consolidated with file-path-based keys."
         }
       }

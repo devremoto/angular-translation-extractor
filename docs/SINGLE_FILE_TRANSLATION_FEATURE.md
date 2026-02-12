@@ -85,7 +85,7 @@ You can switch between modes at any time:
 
 ## Auto-Translation
 
-Both modes work with auto-translation services (Google Translate / LibreTranslate):
+Both modes work with auto-translation services (Google Translate):
 - With single-file mode, all strings are translated in one pass
 - Potentially faster for large translation batches
 - Same translation quality and configuration options apply

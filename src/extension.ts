@@ -865,33 +865,9 @@ async function executeAutoTranslate(
 ) {
   if (!cfg.autoTranslate) return;
 
-  if (cfg.translationService !== "google" && cfg.translationService !== "libretranslate") {
-    if (cfg.useTranslateCommand) {
-      // Fallback to command line translation
-      // for (const bf of baseFiles) {
-      //   for (const targetLocale of generatedLangs.map(l => l.code)) {
-      //     if (targetLocale === baseLocaleCode) continue;
-      //     // Basic support for custom command in selection/file mode
-      //     // We reuse the logic from main flow if possible, but for now focusing on the services
-      //   }
-      // }
-    }
-    return;
-  }
-
-  // Dynamic imports
-
-  let translateJsonFile: any;
-  if (cfg.translationService === "google") {
-    const mod = await import("./google-translate");
-    translateJsonFile = mod.translateJsonFile;
-  } else {
-    const mod = await import("./libretranslate");
-    translateJsonFile = mod.translateJsonFile;
-  }
-
-  const serviceName = cfg.translationService === "google" ? "Google Translate" : "LibreTranslate";
-  output.appendLine(`[auto-translate] Starting ${serviceName}...`);
+  const mod = await import("./google-translate");
+  const translateJsonFile = mod.translateJsonFile;
+  output.appendLine(`[auto-translate] Starting Google Translate...`);
 
   const effectiveBaseLocale = cfg.onlyMainLanguages
     ? baseLocaleCode.split("-")[0]

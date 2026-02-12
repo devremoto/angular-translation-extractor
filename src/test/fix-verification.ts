@@ -2,7 +2,6 @@ import axios from 'axios';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { translateJsonFile as googleTranslate } from '../google-translate';
-import { translateJsonFile as libreTranslate } from '../libretranslate';
 
 async function runTests() {
     console.log("🧪 Starting verification tests...\n");
@@ -44,42 +43,8 @@ async function runTests() {
         (axios.get as unknown) = originalGet;
     }
 
-    // --- Test 2: LibreTranslate Source Param ---
-    console.log("\nTest 2: LibreTranslate receives sourceLang parameter");
-    let libreBody: Record<string, unknown> = {};
 
-    // Mock axios.post
-    const originalPost = axios.post;
-    (axios.post as unknown) = async (url: string, body: Record<string, unknown>) => {
-        libreBody = body;
-        return { data: { translatedText: "Translated Value" } };
-    };
-
-    try {
-        await libreTranslate({
-            inputFile: tempFile,
-            outputDir: path.dirname(tempFile),
-            targetLang: 'it',
-            sourceLang: 'en', // Explicit source
-            onProgress: () => { }
-        });
-
-        if (libreBody.source === 'en') {
-            console.log("✅ LibreTranslate body contains source='en'");
-        } else {
-            console.error("❌ LibreTranslate body MISSING source='en'. Got: ", libreBody);
-            failures++;
-        }
-    } catch (e) {
-        console.error("❌ LibreTranslate test failed with error:", e);
-        failures++;
-    } finally {
-        (axios as any).post = originalPost;
-        // Cleanup
-        try { await fs.unlink(tempFile); } catch { /* no-op */ }
-        try { await fs.unlink(path.resolve(__dirname, 'pt.json')); } catch { /* no-op */ }
-        try { await fs.unlink(path.resolve(__dirname, 'it.json')); } catch { /* no-op */ }
-    }
+    
 
     console.log(`\nTests completed. ${failures} failures.`);
     process.exit(failures > 0 ? 1 : 0);

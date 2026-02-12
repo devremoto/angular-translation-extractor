@@ -111,7 +111,7 @@ Controlled by `updateMode` setting:
 - **utils.ts**: File system utilities
 - **keygen.ts**: Translation key generation
 - **translate.ts**: Auto-translation orchestration
-- **google-translate.ts** / **libretranslate.ts**: Translation services
+- **google-translate.ts** : Translation services
 - **loader-generator.ts**: Generates Angular translation loader code
 - **updateMainTs.ts** / **updateAngularJson.ts**: Angular project integration
 
@@ -190,7 +190,7 @@ translate.get('KEY')
 Controlled by:
 - `autoTranslate: true` - Enable automatic translation after extraction
 - `autoTranslateDefaultLanguage: false` - Skip translating the default language (it's the source!)
-- `translationService: "google" | "libretranslate"` - Which service to use
+- `translationService: "google" ` - Which service to use
 - `googleTranslateDelay: 500` - Rate limiting delay in ms
 
 ## Workspace vs User Settings
