@@ -162,12 +162,7 @@
         "i18nExtractor.languagesJsonPath": {
           "type": "string",
           "default": "src/app/core/json/language-code.json",
-          "description": "Path to JSON containing array of locales to generate. Missing englishName/nativeName/flag will be auto-filled."
-        },
-        "i18nExtractor.baseLocaleCode": {
-          "type": "string",
-          "default": "en",
-          "description": "Base locale code to generate for English source strings (e.g. en, en-US, en-GB)."
+          "description": "Path to JSON containing array of locales to generate. Missing englishName/nativeName/flag will be auto-filled. The language marked with 'default': true will be used as the base locale."
         },
         "i18nExtractor.minStringLength": {
           "type": "number",
@@ -294,7 +289,7 @@
             "google",
             "libretranslate"
           ],
-          "default": "google",
+          "default": "libretranslate",
           "description": "Translation service to use for automatic translation. 'google' (recommended, higher quality) or 'libretranslate' (free but lower quality)."
         },
         "i18nExtractor.googleTranslateDelay": {

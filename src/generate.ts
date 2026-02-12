@@ -42,7 +42,7 @@ function setNestedValue(obj: any, path: string, value: any): void {
   current[parts[parts.length - 1]] = value;
 }
 
-function getAllKeys(obj: any, prefix = ""): string[] {
+export function getAllKeys(obj: any, prefix = ""): string[] {
   const keys: string[] = [];
 
   for (const [key, value] of Object.entries(obj)) {
@@ -57,7 +57,7 @@ function getAllKeys(obj: any, prefix = ""): string[] {
   return keys;
 }
 
-function getNestedValue(obj: any, path: string): string | undefined {
+export function getNestedValue(obj: any, path: string): string | undefined {
   const parts = path.split(".");
   let current = obj;
 
@@ -203,14 +203,15 @@ async function generateAsSingleFilePerLanguage(opts: {
     let merged: LocaleJson;
 
     if (updateMode === "merge") {
-      // merge: Preserve existing translations, only add blanks for new keys
+      // merge: Preserve existing translations, add blanks for new/missing/null/empty keys
       const existingRaw = await readJsonIfExists<LocaleJson>(targetAbs, {});
       const existing = normalizeLocaleJson(existingRaw);
       merged = JSON.parse(JSON.stringify(existing));
 
       for (const key of baseKeys) {
         const existingVal = getNestedValue(merged, key);
-        if (existingVal === undefined) {
+        // Mark for translation if: missing, null, or empty string
+        if (existingVal === undefined || existingVal === null || existingVal === "") {
           setNestedValue(merged, key, "");
         }
       }
@@ -337,14 +338,15 @@ async function generateAsPerFileLocales(opts: {
       let merged: LocaleJson;
 
       if (updateMode === "merge") {
-        // merge: Preserve existing translations, only add blanks for new keys
+        // merge: Preserve existing translations, add blanks for new/missing/null/empty keys
         const existingRaw = await readJsonIfExists<LocaleJson>(targetAbs, {});
         const existing = normalizeLocaleJson(existingRaw);
         merged = JSON.parse(JSON.stringify(existing));
 
         for (const key of baseKeys) {
           const existingVal = getNestedValue(merged, key);
-          if (existingVal === undefined) {
+          // Mark for translation if: missing, null, or empty string
+          if (existingVal === undefined || existingVal === null || existingVal === "") {
             setNestedValue(merged, key, "");
           }
         }

@@ -12,7 +12,7 @@ import { scanForStrings } from "./scan";
 import { LanguageEntry, FoundString } from "./types";
 import { normalizeLanguages } from "./langMeta";
 import { ensureDir, readJsonIfExists, posixRel } from "./utils";
-import { generatePerFileLocales } from "./generate";
+import { generatePerFileLocales, getAllKeys, getNestedValue } from "./generate";
 import { generateLoaderArtifacts } from "./loader-generator";
 import { replaceExtractedStrings, ensureComponentStructure, addTranslateModuleImport, addLanguageSelectorComponent } from "./replaceSource";
 import { updateMainTs } from "./updateMainTs";
@@ -23,7 +23,6 @@ import { reverseTranslateFileScope, reverseTranslateFolderScope, reverseTranslat
 import { extractFromJsTs } from "./extractJsTs";
 import { extractFromHtml } from "./extractHtml";
 import { Project, SyntaxKind } from "ts-morph";
-import { json } from 'node:stream/consumers';
 
 
 
@@ -254,6 +253,330 @@ interface ProcessOptions {
   forceUpdateMode?: "merge" | "overwrite";
 }
 
+interface DefaultJsonBackup {
+  timestamp: number;
+  baseLocaleCode: string;
+  files: Array<{
+    relativePath: string;
+    content: Record<string, any>;
+  }>;
+}
+
+function hasNonEmptyValues(obj: any): boolean {
+  if (obj === null || obj === undefined || obj === '') {
+    return false;
+  }
+
+  if (typeof obj !== 'object') {
+    return true; // Non-empty primitive value
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.some(item => hasNonEmptyValues(item));
+  }
+
+  // For objects, check all values recursively
+  const values = Object.values(obj);
+  if (values.length === 0) {
+    return false; // Empty object
+  }
+
+  return values.some(value => hasNonEmptyValues(value));
+}
+
+async function backupDefaultJson(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  outputRoot: string,
+  baseLocaleCode: string,
+  output: vscode.OutputChannel
+) {
+  try {
+    const workspaceId = vscode.workspace.workspaceFolders?.[0]?.uri.toString() || workspaceRoot;
+    const backupKey = `angular-i18n-default-backup-${Buffer.from(workspaceId).toString('base64').slice(0, 32)}`;
+
+    const outputAbs = path.join(workspaceRoot, outputRoot);
+    const files: Array<{ relativePath: string; content: Record<string, any> }> = [];
+
+    // Find all default language JSON files
+    const searchPattern = new vscode.RelativePattern(outputAbs, `**/${baseLocaleCode}.json`);
+    const foundFiles = await vscode.workspace.findFiles(searchPattern, '**/node_modules/**');
+
+    if (foundFiles.length === 0) {
+      output.appendLine(`[backup] No default language files found to backup`);
+      return;
+    }
+
+    output.appendLine(`[backup] Found ${foundFiles.length} default language file(s), checking content...`);
+
+    for (const fileUri of foundFiles) {
+      const fileAbs = fileUri.fsPath;
+      const relativePath = path.relative(outputAbs, fileAbs);
+
+      try {
+        const contentStr = await fs.readFile(fileAbs, 'utf-8');
+        output.appendLine(`[backup] Reading ${relativePath} (${contentStr.length} bytes)`);
+
+        const content = JSON.parse(contentStr);
+
+        // Only backup files with actual content (non-empty values)
+        if (hasNonEmptyValues(content)) {
+          // Count actual non-empty string values for logging
+          const countNonEmpty = (obj: any): number => {
+            let count = 0;
+            const traverse = (o: any) => {
+              if (typeof o === 'string' && o.length > 0) count++;
+              else if (typeof o === 'object' && o !== null) {
+                Object.values(o).forEach(traverse);
+              }
+            };
+            traverse(obj);
+            return count;
+          };
+          const valueCount = countNonEmpty(content);
+
+          if (valueCount > 0) {
+            files.push({ relativePath, content });
+            output.appendLine(`[backup] ✓ ${relativePath} - ${valueCount} non-empty values - WILL BACKUP`);
+          } else {
+            output.appendLine(`[backup] ✗ ${relativePath} - has keys but all values are empty strings - SKIPPING`);
+          }
+        } else {
+          output.appendLine(`[backup] ✗ Skipping ${relativePath} - all values are empty`);
+        }
+      } catch (e) {
+        output.appendLine(`[backup] ✗ Failed to read ${relativePath}: ${e}`);
+      }
+    }
+
+    if (files.length > 0) {
+      const backup: DefaultJsonBackup = {
+        timestamp: Date.now(),
+        baseLocaleCode,
+        files
+      };
+
+      await context.workspaceState.update(backupKey, backup);
+      output.appendLine(`[backup] ✓ Saved backup of ${files.length} file(s) to workspace state`);
+    } else {
+      output.appendLine(`[backup] ⚠ No valid files to backup (all had empty values)`);
+    }
+  } catch (err) {
+    output.appendLine(`[backup] ✗ Failed to backup default JSON: ${err}`);
+  }
+}
+
+async function restoreDefaultJson(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  outputRoot: string,
+  baseLocaleCode: string,
+  output: vscode.OutputChannel
+): Promise<boolean> {
+  try {
+    const workspaceId = vscode.workspace.workspaceFolders?.[0]?.uri.toString() || workspaceRoot;
+    const backupKey = `angular-i18n-default-backup-${Buffer.from(workspaceId).toString('base64').slice(0, 32)}`;
+
+    const backup = context.workspaceState.get<DefaultJsonBackup>(backupKey);
+
+    if (!backup || backup.baseLocaleCode !== baseLocaleCode) {
+      output.appendLine(`[restore] No backup found for ${baseLocaleCode}`);
+      return false;
+    }
+
+    if (backup.files.length === 0) {
+      output.appendLine(`[restore] Backup exists but contains no files`);
+      return false;
+    }
+
+    output.appendLine(`[restore] Found backup from ${new Date(backup.timestamp).toLocaleString()} with ${backup.files.length} file(s)`);
+
+    // Check if backup has meaningful content (non-empty values)
+    const hasContent = backup.files.some(f => hasNonEmptyValues(f.content));
+    if (!hasContent) {
+      output.appendLine(`[restore] Backup exists but all files have empty values`);
+      return false;
+    }
+
+    const outputAbs = path.join(workspaceRoot, outputRoot);
+    let restored = 0;
+
+    for (const file of backup.files) {
+      // Skip if backup file has no meaningful content
+      if (!hasNonEmptyValues(file.content)) {
+        output.appendLine(`[restore] Skipping backup with empty values: ${file.relativePath}`);
+        continue;
+      }
+
+      const fileAbs = path.join(outputAbs, file.relativePath);
+
+      // Check if file is missing, empty, or contains only empty values
+      let needsRestore = false;
+      try {
+        const stat = await fs.stat(fileAbs);
+        if (stat.size === 0) {
+          needsRestore = true;
+          output.appendLine(`[restore] File is empty: ${file.relativePath}`);
+        } else {
+          // Check if file content has only empty values
+          try {
+            const content = await fs.readFile(fileAbs, 'utf-8');
+            const parsed = JSON.parse(content);
+            if (!hasNonEmptyValues(parsed)) {
+              needsRestore = true;
+              output.appendLine(`[restore] File has all empty values: ${file.relativePath}`);
+            }
+          } catch {
+            // If we can't parse it, consider it corrupt and restore
+            needsRestore = true;
+            output.appendLine(`[restore] File is corrupt: ${file.relativePath}`);
+          }
+        }
+      } catch {
+        needsRestore = true;
+        output.appendLine(`[restore] File missing: ${file.relativePath}`);
+      }
+
+      if (needsRestore) {
+        await ensureDir(path.dirname(fileAbs));
+        await fs.writeFile(fileAbs, JSON.stringify(file.content, null, 2) + '\n', 'utf-8');
+        output.appendLine(`[restore] ✓ Restored ${file.relativePath} from backup`);
+        restored++;
+      }
+    }
+
+    if (restored > 0) {
+      output.appendLine(`[restore] Restored ${restored} file(s) from backup (${new Date(backup.timestamp).toLocaleString()})`);
+      return true;
+    }
+
+    return false;
+  } catch (err) {
+    output.appendLine(`[restore] Failed to restore default JSON: ${err}`);
+    return false;
+  }
+}
+
+async function detectMissingOrDeletedFiles(
+  workspaceRoot: string,
+  outputRoot: string,
+  baseLocaleCode: string,
+  languages: LanguageEntry[],
+  onlyMainLanguages: boolean,
+  output: vscode.OutputChannel
+): Promise<{ hasMissingFiles: boolean; missingFiles: string[]; hasEmptyDefaultFiles: boolean; hasIncompleteTranslations: boolean }> {
+  const outputAbs = path.join(workspaceRoot, outputRoot);
+  const missingFiles: string[] = [];
+  let hasEmptyDefaultFiles = false;
+  let hasIncompleteTranslations = false;
+
+  try {
+    // Get all default language files
+    const defaultPattern = new vscode.RelativePattern(outputAbs, `**/${baseLocaleCode}.json`);
+    const defaultFiles = await vscode.workspace.findFiles(defaultPattern, '**/node_modules/**');
+
+    if (defaultFiles.length === 0) {
+      output.appendLine(`[detection] No default language files found - will attempt restore`);
+      return { hasMissingFiles: true, missingFiles: ['default-language-missing'], hasEmptyDefaultFiles: false, hasIncompleteTranslations: false };
+    }
+
+    // Check if default files are empty or invalid
+    for (const defaultFile of defaultFiles) {
+      const fileAbs = defaultFile.fsPath;
+      const relativePath = path.relative(outputAbs, fileAbs);
+
+      try {
+        const stat = await fs.stat(fileAbs);
+        if (stat.size === 0) {
+          output.appendLine(`[detection] Default file is empty: ${relativePath}`);
+          hasEmptyDefaultFiles = true;
+          missingFiles.push(`${relativePath} (empty)`);
+        } else {
+          // Check if file has meaningful content (non-empty values)
+          const content = await fs.readFile(fileAbs, 'utf-8');
+          const parsed = JSON.parse(content);
+          if (!hasNonEmptyValues(parsed)) {
+            output.appendLine(`[detection] Default file has all empty values: ${relativePath}`);
+            hasEmptyDefaultFiles = true;
+            missingFiles.push(`${relativePath} (all empty values)`);
+          }
+        }
+      } catch (e) {
+        output.appendLine(`[detection] Error reading default file ${relativePath}: ${e}`);
+        hasEmptyDefaultFiles = true;
+      }
+    }
+
+    // For each default file, check if corresponding language files exist AND have all properties
+    for (const defaultFile of defaultFiles) {
+      const dir = path.dirname(defaultFile.fsPath);
+      const relativePath = path.relative(outputAbs, dir);
+
+      // Load base language keys for comparison
+      let baseKeys: string[] = [];
+      try {
+        const baseContent = await fs.readFile(defaultFile.fsPath, 'utf-8');
+        const baseJson = JSON.parse(baseContent);
+        baseKeys = getAllKeys(baseJson);
+      } catch (e) {
+        output.appendLine(`[detection] Could not load base keys from ${relativePath}/${baseLocaleCode}.json: ${e}`);
+      }
+
+      for (const lang of languages) {
+        if (!lang.active && lang.code !== baseLocaleCode) continue;
+
+        const langCode = onlyMainLanguages ? lang.code.split('-')[0] : lang.code;
+        if (langCode === baseLocaleCode) continue; // Skip comparing base to itself
+
+        const expectedFile = path.join(dir, `${langCode}.json`);
+
+        try {
+          await fs.access(expectedFile);
+
+          // File exists - check if it has all properties from base language
+          if (baseKeys.length > 0) {
+            try {
+              const targetContent = await fs.readFile(expectedFile, 'utf-8');
+              const targetJson = JSON.parse(targetContent);
+
+              // Check for missing, null, or empty properties
+              let missingCount = 0;
+              for (const key of baseKeys) {
+                const value = getNestedValue(targetJson, key);
+                if (value === undefined || value === null || value === "") {
+                  missingCount++;
+                }
+              }
+
+              if (missingCount > 0) {
+                output.appendLine(`[detection] ${relativePath}/${langCode}.json has ${missingCount} missing/empty properties`);
+                hasIncompleteTranslations = true;
+              }
+            } catch (e) {
+              output.appendLine(`[detection] Error checking properties in ${relativePath}/${langCode}.json: ${e}`);
+            }
+          }
+        } catch {
+          missingFiles.push(`${relativePath}/${langCode}.json`);
+        }
+      }
+    }
+
+    if (missingFiles.length > 0) {
+      output.appendLine(`[detection] Found ${missingFiles.length} missing translation file(s)`);
+      missingFiles.slice(0, 5).forEach(f => output.appendLine(`  - ${f}`));
+      if (missingFiles.length > 5) {
+        output.appendLine(`  ... and ${missingFiles.length - 5} more`);
+      }
+    }
+
+    return { hasMissingFiles: missingFiles.length > 0, missingFiles, hasEmptyDefaultFiles, hasIncompleteTranslations };
+  } catch (err) {
+    output.appendLine(`[detection] Error detecting missing files: ${err}`);
+    return { hasMissingFiles: false, missingFiles: [], hasEmptyDefaultFiles: false, hasIncompleteTranslations: false };
+  }
+}
+
 async function processLocalesAndArtifacts(
   context: vscode.ExtensionContext,
   root: string,
@@ -265,31 +588,119 @@ async function processLocalesAndArtifacts(
   output.appendLine(`[angular-i18n] Reading locales list: ${cfg.languagesJsonPath}`);
   const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
 
+  // Determine actual base locale code (MUST have a language with default: true)
+  const defaultLang = langs.find(l => l.default === true);
+  if (!defaultLang) {
+    throw new Error(`No language marked with "default": true in ${cfg.languagesJsonPath}. At least one language must be marked as default.`);
+  }
+  const baseLocaleCode = defaultLang.code;
+  output.appendLine(`[angular-i18n] Base locale: ${baseLocaleCode} (from ${defaultLang.englishName})`);
+
   // Check for language changes
   const storedLangs = context.workspaceState.get<LanguageEntry[]>("angular-i18n-languages", []);
   const oldCodes = new Set(storedLangs.map(l => l.code));
   const newCodes = new Set(langs.map(l => l.code));
 
+  // Create map for easy lookup of old language properties
+  const oldLangMap = new Map(storedLangs.map(l => [l.code, l]));
+
+  // Check for missing or deleted files BEFORE checking language changes
+  const { hasMissingFiles, missingFiles, hasEmptyDefaultFiles, hasIncompleteTranslations } = await detectMissingOrDeletedFiles(
+    root,
+    cfg.outputRoot,
+    baseLocaleCode,
+    langs,
+    cfg.onlyMainLanguages,
+    output
+  );
+
+  if (hasIncompleteTranslations) {
+    output.appendLine(`[angular-i18n] Incomplete translations detected - will regenerate to fill missing properties.`);
+  }
+
+  // Try to restore default language if missing or empty
+  let wasRestored = false;
+  if (hasMissingFiles && (missingFiles.includes('default-language-missing') || hasEmptyDefaultFiles)) {
+    const reason = hasEmptyDefaultFiles ? 'contains empty values' : 'missing';
+    output.appendLine(`[angular-i18n] Default language files ${reason} - attempting restore from backup...`);
+    const restored = await restoreDefaultJson(context, root, cfg.outputRoot, baseLocaleCode, output);
+    if (restored) {
+      output.appendLine(`[angular-i18n] ✓ Successfully restored default language files from backup`);
+      wasRestored = true;
+      // If we restored successfully, verify the restored files have content
+      // Re-check to ensure restoration was successful
+      const recheckResult = await detectMissingOrDeletedFiles(
+        root,
+        cfg.outputRoot,
+        baseLocaleCode,
+        langs,
+        cfg.onlyMainLanguages,
+        output
+      );
+      if (!recheckResult.hasEmptyDefaultFiles) {
+        output.appendLine(`[angular-i18n] ✓ Restored files are valid. Will skip regenerating default language.`);
+      } else {
+        output.appendLine(`[angular-i18n] ⚠ Restored files still appear empty. Will regenerate from source.`);
+        wasRestored = false;
+      }
+    } else {
+      output.appendLine(`[angular-i18n] ⚠ Could not restore default language - will regenerate from source code`);
+    }
+  }
+
   let hasChanges = false;
   if (oldCodes.size !== newCodes.size) {
     hasChanges = true;
   } else {
+    // Check for added/removed languages
     for (const c of oldCodes) {
       if (!newCodes.has(c)) {
         hasChanges = true;
         break;
       }
     }
-    // Also check active/default status if needed, but code set covers add/remove
+
+    // Check for changes in active/default status
+    if (!hasChanges) {
+      for (const lang of langs) {
+        const oldLang = oldLangMap.get(lang.code);
+        if (oldLang && (oldLang.active !== lang.active || oldLang.default !== lang.default)) {
+          hasChanges = true;
+          break;
+        }
+      }
+    }
   }
+
+  // Track if any languages were newly activated
+  let hasNewlyActivatedLangs = false;
 
   if (hasChanges) {
     output.appendLine(`[angular-i18n] 🔄 Language configuration change detected.`);
     const added = langs.filter(l => !oldCodes.has(l.code)).map(l => l.code);
     const removed = storedLangs.filter(l => !newCodes.has(l.code)).map(l => l.code);
+    const statusChanged = langs.filter(l => {
+      const oldLang = oldLangMap.get(l.code);
+      return oldLang && (oldLang.active !== l.active || oldLang.default !== l.default);
+    }).map(l => {
+      const oldLang = oldLangMap.get(l.code);
+      const changes: string[] = [];
+      if (oldLang && oldLang.active !== l.active) {
+        changes.push(`active: ${oldLang.active} → ${l.active}`);
+        // Check if this is a newly activated language
+        if (oldLang.active === false && l.active === true) {
+          hasNewlyActivatedLangs = true;
+        }
+      }
+      if (oldLang && oldLang.default !== l.default) {
+        changes.push(`default: ${oldLang.default} → ${l.default}`);
+      }
+      return `${l.code} (${changes.join(', ')})`;
+    });
 
     if (added.length) output.appendLine(`  + Added: ${added.join(", ")}`);
     if (removed.length) output.appendLine(`  - Removed: ${removed.join(", ")}`);
+    if (statusChanged.length) output.appendLine(`  ~ Status changed: ${statusChanged.join(", ")}`);
 
     // Update stored state
     await context.workspaceState.update("angular-i18n-languages", langs);
@@ -297,8 +708,26 @@ async function processLocalesAndArtifacts(
     output.appendLine(`[angular-i18n] Language configuration unchanged.`);
   }
 
-  const defaultLang = normalizeLanguages(langs).find(l => l.default === true)?.code;
-  const baseLocaleCode = defaultLang ?? cfg.baseLocaleCode;
+  // Early exit if no changes detected
+  const nothingNew = found.length === 0 || found.every(s => s.isAlreadyTranslated);
+
+  // Don't skip if: languages were newly activated, files are missing, translations incomplete, or there are changes
+  if (!hasChanges && !hasMissingFiles && !hasIncompleteTranslations && nothingNew && (options.forceUpdateMode ?? cfg.updateMode) === "merge") {
+    output.appendLine(`[angular-i18n] All strings valid/translated and configuration unchanged. Skipping generation.`);
+    return {
+      gen: { baseFiles: [], filesProcessed: 0, stringsAdded: 0, keyMapByFile: {} },
+      generatedLangs: [],
+      baseLocaleCode
+    };
+  }
+
+  if (hasNewlyActivatedLangs) {
+    output.appendLine(`[angular-i18n] Newly activated languages detected - ensuring files are generated.`);
+  }
+
+  if (hasMissingFiles) {
+    output.appendLine(`[angular-i18n] Missing translation files detected - will regenerate.`);
+  }
 
   const generatedLangs = langs.filter(lang => {
     if (lang.active === true) return true;
@@ -308,6 +737,13 @@ async function processLocalesAndArtifacts(
   });
 
   output.appendLine(`[angular-i18n] Generating locale JSONs under: ${cfg.outputRoot}`);
+
+  // If we restored valid backup, use merge mode to preserve restored values
+  const effectiveUpdateMode = wasRestored ? "merge" : (options.forceUpdateMode ?? cfg.updateMode);
+  if (wasRestored) {
+    output.appendLine(`[angular-i18n] Using merge mode to preserve restored backup values`);
+  }
+
   const gen = await generatePerFileLocales({
     workspaceRoot: root,
     srcDir: cfg.srcDir,
@@ -315,10 +751,29 @@ async function processLocalesAndArtifacts(
     baseLocaleCode: baseLocaleCode,
     languages: generatedLangs,
     found,
-    updateMode: options.forceUpdateMode ?? cfg.updateMode,
+    updateMode: effectiveUpdateMode,
     onlyMainLanguages: cfg.onlyMainLanguages,
     singleFilePerLanguage: cfg.singleFilePerLanguage
   });
+
+  // Backup default language files immediately after generation
+  // Only backup if we actually generated content (not empty values)
+  if (gen.stringsAdded > 0) {
+    output.appendLine(`[angular-i18n] Backing up default language files with ${gen.stringsAdded} strings...`);
+    // Add a small delay to ensure files are written
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await backupDefaultJson(context, root, cfg.outputRoot, baseLocaleCode, output);
+  } else if (gen.filesProcessed > 0 && found.length > 0 && !wasRestored) {
+    // Only backup if files were processed, we had strings, AND we didn't just restore
+    // (Don't backup immediately after restoring - keep the restored backup)
+    output.appendLine(`[angular-i18n] Backing up default language files after processing...`);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await backupDefaultJson(context, root, cfg.outputRoot, baseLocaleCode, output);
+  } else if (wasRestored) {
+    output.appendLine(`[angular-i18n] Skipping backup - using restored backup from earlier`);
+  } else {
+    output.appendLine(`[angular-i18n] Skipping backup - no new strings were added (strings added: ${gen.stringsAdded}, found: ${found.length})`);
+  }
 
   let replaceResult = { stringsReplaced: 0 };
   if (!options.skipReplacement) {
@@ -517,7 +972,6 @@ export function activate(context: vscode.ExtensionContext) {
     await runExtractionPipeline(context, folders[0], async (root, cfg, output) => {
       output.appendLine(`[angular-i18n] Scanning ${cfg.srcDir}/ (js/ts/html)...`);
       const found = await scanForStrings({ workspaceRoot: root, cfg });
-      output.appendLine(`[angular-i18n] strings found: ${JSON.stringify(found)}`);
       output.appendLine(`[angular-i18n] Found ${found.length} candidate strings.`);
       return found;
     });
@@ -749,11 +1203,19 @@ export function activate(context: vscode.ExtensionContext) {
       const restoreConsole = captureConsoleLogs(output);
 
       try {
+        // Load languages to get baseLocaleCode
+        const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
+        const defaultLang = langs.find(l => l.default === true);
+        if (!defaultLang) {
+          throw new Error(`No language marked with "default": true in ${cfg.languagesJsonPath}`);
+        }
+        const baseLocaleCode = defaultLang.code;
+
         output.appendLine(
           `[angular-i18n-reverse] Starting reverse translation for folder: ${folderPath}`
         );
         output.appendLine(
-          `[angular-i18n-reverse] Base locale code: ${cfg.baseLocaleCode}`
+          `[angular-i18n-reverse] Base locale code: ${baseLocaleCode}`
         );
 
         const result = await reverseTranslateFolderScope(
@@ -762,7 +1224,7 @@ export function activate(context: vscode.ExtensionContext) {
           path.join(root, cfg.srcDir),
           path.join(root, cfg.outputRoot),
           cfg.languagesJsonPath,
-          cfg.baseLocaleCode,
+          baseLocaleCode,
           cfg.onlyMainLanguages,
           cfg.ignoreGlobs,
           { appendLine: (msg: string) => output.appendLine(msg) }
@@ -828,11 +1290,19 @@ export function activate(context: vscode.ExtensionContext) {
       const restoreConsole = captureConsoleLogs(output);
 
       try {
+        // Load languages to get baseLocaleCode
+        const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
+        const defaultLang = langs.find(l => l.default === true);
+        if (!defaultLang) {
+          throw new Error(`No language marked with "default": true in ${cfg.languagesJsonPath}`);
+        }
+        const baseLocaleCode = defaultLang.code;
+
         output.appendLine(
           `[angular-i18n-reverse] Starting reverse translation for file: ${filePath}`
         );
         output.appendLine(
-          `[angular-i18n-reverse] Base locale code: ${cfg.baseLocaleCode}`
+          `[angular-i18n-reverse] Base locale code: ${baseLocaleCode}`
         );
 
         const result = await reverseTranslateFileScope(
@@ -841,7 +1311,7 @@ export function activate(context: vscode.ExtensionContext) {
           path.join(root, cfg.srcDir),
           path.join(root, cfg.outputRoot),
           cfg.languagesJsonPath,
-          cfg.baseLocaleCode,
+          baseLocaleCode,
           cfg.onlyMainLanguages,
           cfg.ignoreGlobs,
           { appendLine: (msg: string) => output.appendLine(msg) }
@@ -906,6 +1376,14 @@ export function activate(context: vscode.ExtensionContext) {
       const restoreConsole = captureConsoleLogs(output);
 
       try {
+        // Load languages to get baseLocaleCode
+        const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
+        const defaultLang = langs.find(l => l.default === true);
+        if (!defaultLang) {
+          throw new Error(`No language marked with "default": true in ${cfg.languagesJsonPath}`);
+        }
+        const baseLocaleCode = defaultLang.code;
+
         output.appendLine(
           `[angular-i18n-reverse] Starting reverse translation for selection in: ${filePath}`
         );
@@ -922,7 +1400,7 @@ export function activate(context: vscode.ExtensionContext) {
           path.join(root, cfg.srcDir),
           path.join(root, cfg.outputRoot),
           cfg.languagesJsonPath,
-          cfg.baseLocaleCode,
+          baseLocaleCode,
           cfg.onlyMainLanguages,
           cfg.ignoreGlobs,
           { appendLine: (msg: string) => output.appendLine(msg) }

@@ -4,7 +4,6 @@ export type ExtConfig = {
   srcDir: string;
   outputRoot: string;
   languagesJsonPath: string;
-  baseLocaleCode: string;
   minStringLength: number;
   ignoreGlobs: string[];
   skipGlobs: string[];
@@ -30,7 +29,6 @@ export function getConfig(): ExtConfig {
     srcDir: cfg.get<string>("srcDir", "src"),
     outputRoot: cfg.get<string>("outputRoot", "src/assets/i18n"),
     languagesJsonPath: cfg.get<string>("languagesJsonPath", "src/assets/i18n-languages.json"),
-    baseLocaleCode: cfg.get<string>("baseLocaleCode", "en"),
     minStringLength: cfg.get<number>("minStringLength", 2),
     ignoreGlobs: cfg.get<string[]>("ignoreGlobs", [
       "**/*.test.*",
