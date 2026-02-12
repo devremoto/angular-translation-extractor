@@ -56,6 +56,16 @@
         "command": "angularTranslation.reverseSelection",
         "title": "Reverse Translate (Selection)",
         "category": "Angular Translation"
+      },
+      {
+        "command": "angularTranslation.extractSelectionParenthesis",
+        "title": "Extract Selection into ( 'KEY' | translate )",
+        "category": "Angular Translation"
+      },
+      {
+        "command": "angularTranslation.insertSelector",
+        "title": "Insert Language Selector",
+        "category": "Angular Translation"
       }
     ],
     "submenus": [
@@ -110,6 +120,11 @@
           "when": "editorFocus && editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
         },
         {
+          "command": "angularTranslation.extractSelectionParenthesis",
+          "group": "1_extract",
+          "when": "editorFocus && editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
+        },
+        {
           "command": "angularTranslation.reverseFromFolder",
           "group": "2_reverse",
           "when": "explorerResourceIsFolder"
@@ -123,6 +138,11 @@
           "command": "angularTranslation.reverseSelection",
           "group": "2_reverse",
           "when": "editorFocus && editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
+        },
+        {
+          "command": "angularTranslation.insertSelector",
+          "group": "3_utils",
+          "when": "resourceLangId == html || resourceExtname == .html"
         }
       ]
     },

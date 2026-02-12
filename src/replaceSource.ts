@@ -287,6 +287,72 @@ export async function addTranslateModuleImport(tsFile: string, addToComponentImp
     return true;
 }
 
+export async function addLanguageSelectorComponent(tsFile: string, importPath: string): Promise<boolean> {
+    let content = await fs.readFile(tsFile, "utf8");
+    let modified = false;
+
+    // Remove .ts extension from import path if present
+    const importModulePath = importPath.replace(/\.ts$/, '');
+
+    // Check if imported
+    const hasImport = /import\s*\{[^}]*\bTgLanguageSelectorComponent\b[^}]*\}\s*from/.test(content);
+
+    if (!hasImport) {
+        // Add import
+        const lastImportIndex = findLastImportIndex(content);
+        const importLine = `import { TgLanguageSelectorComponent } from '${importModulePath}';\n`;
+        if (lastImportIndex >= 0) {
+            content = content.slice(0, lastImportIndex) + importLine + content.slice(lastImportIndex);
+        } else {
+            content = importLine + content;
+        }
+        modified = true;
+    }
+
+    // Add to @Component imports array
+    const componentMatch = content.match(/@Component\s*\(\s*\{/);
+    if (componentMatch) {
+        const startIdx = (componentMatch.index ?? 0) + componentMatch[0].length;
+        const componentMetadata = extractComponentMetadata(content, startIdx);
+
+        if (componentMetadata) {
+            const importsMatch = componentMetadata.match(/imports\s*:\s*\[/);
+            if (importsMatch) {
+                // Check if already in the imports array
+                const importsArrayRange = findImportsArrayRange(componentMetadata, importsMatch.index ?? 0);
+                const importsArrayContent = importsArrayRange
+                    ? componentMetadata.slice(importsArrayRange.start, importsArrayRange.end)
+                    : componentMetadata.slice(importsMatch.index ?? 0);
+                const hasSelectorInArray = /\bTgLanguageSelectorComponent\b/.test(importsArrayContent);
+
+                if (!hasSelectorInArray) {
+                    const importsStartIdx = startIdx + (importsMatch.index ?? 0) + importsMatch[0].length;
+                    const insertText = "TgLanguageSelectorComponent, ";
+                    content = content.slice(0, importsStartIdx) + insertText + content.slice(importsStartIdx);
+                    modified = true;
+                }
+            } else {
+                // Add imports array after selector or first property
+                const selectorMatch = componentMetadata.match(/selector\s*:\s*['"][^'"]*['"]\s*,?/);
+                if (selectorMatch) {
+                    const selectorEndIdx = startIdx + (selectorMatch.index ?? 0) + selectorMatch[0].length;
+                    const hasComma = content[selectorEndIdx - 1] === ",";
+                    const insertText = hasComma ? "\n  imports: [TgLanguageSelectorComponent]," : ",\n  imports: [TgLanguageSelectorComponent]";
+                    content = content.slice(0, selectorEndIdx) + insertText + content.slice(selectorEndIdx);
+                    modified = true;
+                }
+                // If no selector, might be tricky, skip for now to avoid breaking syntax
+            }
+        }
+    }
+
+    if (modified) {
+        await fs.writeFile(tsFile, content, "utf8");
+        return true;
+    }
+    return false;
+}
+
 export async function ensureComponentStructure(tsFile: string, bootstrapStyle: "standalone" | "module" = "module"): Promise<boolean> {
     const shouldAddToComponent = bootstrapStyle === "standalone";
     const imported = await addTranslateModuleImport(tsFile, shouldAddToComponent);

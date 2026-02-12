@@ -14,7 +14,7 @@ import { normalizeLanguages } from "./langMeta";
 import { ensureDir, readJsonIfExists, posixRel } from "./utils";
 import { generatePerFileLocales } from "./generate";
 import { generateLoaderArtifacts } from "./loader-generator";
-import { replaceExtractedStrings, ensureComponentStructure, addTranslateModuleImport } from "./replaceSource";
+import { replaceExtractedStrings, ensureComponentStructure, addTranslateModuleImport, addLanguageSelectorComponent } from "./replaceSource";
 import { updateMainTs } from "./updateMainTs";
 import { runTranslateCommand } from "./translate";
 import { updateAngularJson } from "./updateAngularJson";
@@ -552,12 +552,9 @@ export function activate(context: vscode.ExtensionContext) {
     }, { skipHeavyOps: false }); // keep false to ensure config integrity
   });
 
-  const extractSelectionDisposable = vscode.commands.registerCommand("angularTranslation.extractSelection", async () => {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) return;
+  const runExtractionForSelection = async (editor: vscode.TextEditor, useParenthesis: boolean = false) => {
     const selection = editor.selection;
     if (selection.isEmpty) return;
-
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) return;
 
@@ -659,32 +656,72 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (result) {
       const keyMap = result.gen.keyMapByFile[fileAbs];
-      if (keyMap && keyMap[found.text]) {
-        const key = keyMap[found.text];
+      // Try exact match or rawText as fallback
+      // Fallback: try rawText if text lookup fails.
+      // Sometimes whitespace normalization in pipeline differs from selection.
+      let key = keyMap ? keyMap[found.text] : undefined;
+      if (!key && keyMap && found.rawText) {
+        key = keyMap[found.rawText];
+      }
+      // If still not found, try without quotes if rawText had them
+      if (!key && keyMap && found.rawText) {
+        const stripped = found.rawText.replace(/^['"`]|['"`]$/g, '');
+        key = keyMap[stripped];
+      }
+
+      if (key) {
         await editor.edit(editBuilder => {
-          const replacement = (kind === "html-text")
-            ? `{{ '${key}' | translate }}`
-            : `this.translate.instant('${key}')`;
+          let replacement = "";
+          if (useParenthesis) {
+            replacement = `( '${key}' | translate )`;
+          } else {
+            if (ext === ".ts") {
+              replacement = `this.translate.instant('${key}')`;
+            } else {
+              // html
+              replacement = `{{ '${key}' | translate }}`;
+            }
+          }
           editBuilder.replace(range, replacement);
         });
+
         await editor.document.save();
 
-        if (ext === ".ts") await ensureComponentStructure(fileAbs, result.cfg.angularBootstrapStyle);
+        if (ext === ".ts") {
+          try {
+            await ensureComponentStructure(fileAbs, result.cfg.angularBootstrapStyle);
+          } catch (e) { console.error(e); }
+        }
         else if (ext === ".html" && result.cfg.angularBootstrapStyle === "standalone") {
           const potTs = fileAbs.replace(/\.html$/, ".ts");
-          await fs.access(potTs).then(() => addTranslateModuleImport(potTs, true)).catch(() => { });
+          try {
+            await fs.access(potTs);
+            await addTranslateModuleImport(potTs, true);
+          } catch (e) { console.error(e); }
         }
 
-        // Re-run app config to secure everything
-        await performAppConfiguration(result.root, result.cfg, result.baseLocaleCode, result.output);
-        vscode.window.showInformationMessage(`Extracted '${extractedText}' to key '${key}'`);
+        vscode.window.showInformationMessage(`Extracted to key '${key}'`);
       } else {
-        vscode.window.showErrorMessage("Could not generate key for selection.");
+        result.output.appendLine(`[extractSelection] Failed to find key for text: "${found.text}"`);
+        if (keyMap) {
+          result.output.appendLine(`[extractSelection] Available keys for file: ${JSON.stringify(Object.keys(keyMap))}`);
+        }
+        vscode.window.showErrorMessage(`Could not generate key for selection. Check Output for details.`);
       }
     }
+  };
+
+  const extractSelectionDisposable = vscode.commands.registerCommand("angularTranslation.extractSelection", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor) await runExtractionForSelection(editor, false);
   });
 
-  context.subscriptions.push(disposable, extractFileDisposable, extractSelectionDisposable);
+  const extractSelectionParenthesisDisposable = vscode.commands.registerCommand("angularTranslation.extractSelectionParenthesis", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor) await runExtractionForSelection(editor, true);
+  });
+
+  context.subscriptions.push(disposable, extractFileDisposable, extractSelectionDisposable, extractSelectionParenthesisDisposable);
 
 
 
@@ -913,6 +950,70 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(reverseSelectionDisposable);
+
+  // Register insert Language Selector command
+  const insertSelectorDisposable = vscode.commands.registerCommand(
+    "angularTranslation.insertSelector",
+    async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+
+      const currentFile = editor.document.uri.fsPath;
+
+      // 1. Insert snippet at cursor
+      const snippet = `<tg-language-selector mode="white"></tg-language-selector>`;
+      await editor.insertSnippet(new vscode.SnippetString(snippet));
+
+      // 2. Find associated TS file
+      // Expecting standard Angular naming: name.component.html -> name.component.ts
+      let targetTsFile: string | null = null;
+      if (currentFile.endsWith(".html")) {
+        const potentialTs = currentFile.replace(/\.html$/, ".ts");
+        try {
+          await fs.access(potentialTs);
+          targetTsFile = potentialTs;
+        } catch {
+          // If TS file doesn't exist, we can't add imports
+          return;
+        }
+      } else {
+        // Should not happen due to 'when' clause, but safe check
+        return;
+      }
+
+      if (!targetTsFile) return;
+
+      // 3. Find TgLanguageSelectorComponent in workspace
+      const files = await vscode.workspace.findFiles("**/tg-language-selector.component.ts", "**/node_modules/**", 1);
+      if (files.length === 0) {
+        // Silent fail or warning? User asked to "include the import", implying they expect it to work if present.
+        // If not present, maybe they haven't generated it yet.
+        return;
+      }
+
+      const selectorFile = files[0].fsPath;
+
+      // 4. Calculate relative import path
+      const tsDir = path.dirname(targetTsFile);
+      let relativePath = path.relative(tsDir, selectorFile);
+
+      if (!relativePath.startsWith(".")) {
+        relativePath = "./" + relativePath;
+      }
+      // Normalize slashes
+      relativePath = relativePath.split(path.sep).join(path.posix.sep);
+
+      // 5. Add import and component config
+      try {
+        await addLanguageSelectorComponent(targetTsFile, relativePath);
+      } catch (err: unknown) {
+        const msg = (err as Record<string, unknown>)?.message ? String((err as Record<string, unknown>).message) : String(err);
+        console.error(`[angular-i18n] Failed to add selector import: ${msg}`);
+        vscode.window.showWarningMessage(`Failed to add selector import: ${msg}`);
+      }
+    }
+  );
+  context.subscriptions.push(insertSelectorDisposable);
 }
 
 export function deactivate() { }
