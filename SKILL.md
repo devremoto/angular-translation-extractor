@@ -24,15 +24,9 @@ type LanguageEntry = {
 
 ### File Naming Strategy
 
-Controlled by `onlyMainLanguages` setting:
 
-- **`onlyMainLanguages: false`** (default): Full locale codes
   - Files: `en-US.json`, `pt-BR.json`, `es-ES.json`
   - The loader maps full codes to main codes automatically
-  
-- **`onlyMainLanguages: true`**: Main language codes only
-  - Files: `en.json`, `pt.json`, `es.json`
-  - Extracts main language from full code (`en` from `en-US`)
 
  ### Key Construction Rule
 
@@ -43,18 +37,12 @@ Controlled by `onlyMainLanguages` setting:
     - Translation key: `CLOSE`
    
 
-### Translation Modes
+### Translation Mode
 
-Two file generation strategies controlled by `singleFilePerLanguage`:
-
-1. **Single File Per Language** (`singleFilePerLanguage: true`, default since v0.0.1)
+1. **Single File Per Language** 
    - One consolidated file per language in `outputRoot`: `en-US.json`, `pt-BR.json`
    - Better for large applications, easier to manage
 
-2. **Per-File Locales** (`singleFilePerLanguage: false`, legacy)
-   - Mirrors source structure: `src/app/user/user.component.html` → `i18n/app/user/user.component/en-US.json`
-   - Localized files next to each component
-   - Can become complex for large projects
 
 ### Update Modes
 
@@ -70,9 +58,6 @@ Controlled by `updateMode` setting:
 {
   "i18nExtractor.languagesJsonPath": "src/app/core/json/language-code.json",
   "i18nExtractor.baseLocaleCode": "en",  // Used for file naming convention
-  "i18nExtractor.onlyMainLanguages": false,  // false = full codes (en-US), true = main codes (en)
-  "i18nExtractor.onlyGenerateActiveLangs": true,  // Generate only for active: true languages
-  "i18nExtractor.singleFilePerLanguage": true,  // Single consolidated file vs per-file structure
   "i18nExtractor.srcDir": "src",
   "i18nExtractor.outputRoot": "src/assets/i18n",
   "i18nExtractor.updateMode": "merge",  // merge | overwrite | recreate
@@ -89,9 +74,7 @@ Controlled by `updateMode` setting:
 3. Replaces translation keys with original string values
 4. Writes changes back to source files
 
-**Critical**: Must handle both file naming strategies:
-- If `onlyMainLanguages: false` → look for `en-US.json`
-- If `onlyMainLanguages: true` → look for `en.json`
+
 - Must read languages JSON to find the actual default language code
 
 ## Code Structure
@@ -128,13 +111,6 @@ getMainLanguageCode(code: string): string
 // Normalize and auto-fill language metadata
 normalizeLanguages(entries: LanguageEntry[]): LanguageEntry[]
 ```
-
-### Translation Generation
-```typescript
-generatePerFileLocales(opts): Promise<{ baseFiles, filesProcessed, stringsAdded, keyMapByFile }>
-// Handles both single-file and per-file strategies based on singleFilePerLanguage flag
-```
-
 ### Reverse Translation
 ```typescript
 loadTranslationKeyMap(outputRoot: string, baseLocaleCode: string): Promise<Map<string, string>>
@@ -224,6 +200,5 @@ Settings can be configured at:
 1. Always read `config.ts` to understand available configuration options
 2. Check `langMeta.ts` for language handling utilities
 3. Remember: `default: true` in languages JSON is the source of truth for base language
-4. Consider both `onlyMainLanguages` and `singleFilePerLanguage` settings in any file I/O
 5. Read the languages JSON file when you need to know the default language code
 6. Don't assume file names - they depend on configuration!

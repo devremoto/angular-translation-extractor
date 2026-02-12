@@ -85,21 +85,19 @@ export async function generatePerFileLocales(opts: {
   languages: LanguageEntry[];
   found: FoundString[];
   updateMode: "merge" | "overwrite" | "recreate";
-  onlyMainLanguages?: boolean;
-  singleFilePerLanguage?: boolean;
 }): Promise<{
   baseFiles: Array<{ baseFileAbs: string; outDirAbs: string; targets: string[] }>;
   filesProcessed: number;
   stringsAdded: number;
   keyMapByFile: KeyMapByFile;
 }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode, onlyMainLanguages, singleFilePerLanguage } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode } = opts;
 
-  if (singleFilePerLanguage) {
-    return generateAsSingleFilePerLanguage({ workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode, onlyMainLanguages });
-  } else {
-    return generateAsPerFileLocales({ workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode, onlyMainLanguages });
-  }
+
+  return generateAsSingleFilePerLanguage({ workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode });
+
+
+
 }
 
 async function generateAsSingleFilePerLanguage(opts: {
@@ -110,21 +108,20 @@ async function generateAsSingleFilePerLanguage(opts: {
   languages: LanguageEntry[];
   found: FoundString[];
   updateMode: "merge" | "overwrite" | "recreate";
-  onlyMainLanguages?: boolean;
 }): Promise<{
   baseFiles: Array<{ baseFileAbs: string; outDirAbs: string; targets: string[] }>;
   filesProcessed: number;
   stringsAdded: number;
   keyMapByFile: KeyMapByFile;
 }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode, onlyMainLanguages } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode } = opts;
 
   const outRootAbs = path.join(workspaceRoot, outputRoot);
   await ensureDir(outRootAbs);
 
   // Collect all strings
-  let allLocales = languages.map(l => onlyMainLanguages ? getMainLanguageCode(l.code) : l.code);
-  const mainBaseLocaleCode = onlyMainLanguages ? getMainLanguageCode(baseLocaleCode) : baseLocaleCode;
+  let allLocales = languages.map(l => l.code);
+  const mainBaseLocaleCode =  baseLocaleCode;
   allLocales = Array.from(new Set(allLocales));
   const targetLocales = allLocales.filter(c => c !== mainBaseLocaleCode);
 
@@ -234,140 +231,6 @@ async function generateAsSingleFilePerLanguage(opts: {
   };
 }
 
-async function generateAsPerFileLocales(opts: {
-  workspaceRoot: string;
-  srcDir: string;
-  outputRoot: string;
-  baseLocaleCode: string;
-  languages: LanguageEntry[];
-  found: FoundString[];
-  updateMode: "merge" | "overwrite" | "recreate";
-  onlyMainLanguages?: boolean;
-}): Promise<{
-  baseFiles: Array<{ baseFileAbs: string; outDirAbs: string; targets: string[] }>;
-  filesProcessed: number;
-  stringsAdded: number;
-  keyMapByFile: KeyMapByFile;
-}> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode, onlyMainLanguages } = opts;
-
-  const srcAbs = path.join(workspaceRoot, srcDir);
-  const outRootAbs = path.join(workspaceRoot, outputRoot);
-
-  const byFile = new Map<string, FoundString[]>();
-  for (const s of found) {
-    const arr = byFile.get(s.fileAbs) ?? [];
-    arr.push(s);
-    byFile.set(s.fileAbs, arr);
-  }
-
-  const baseFiles: Array<{ baseFileAbs: string; outDirAbs: string; targets: string[] }> = [];
-  let filesProcessed = 0;
-  let stringsAdded = 0;
-  const keyMapByFile: KeyMapByFile = {};
-
-  // Map language codes to main language if onlyMainLanguages is true, then deduplicate
-  let allLocales = languages.map(l => onlyMainLanguages ? getMainLanguageCode(l.code) : l.code);
-  const mainBaseLocaleCode = onlyMainLanguages ? getMainLanguageCode(baseLocaleCode) : baseLocaleCode;
-
-  // Deduplicate locale codes
-  allLocales = Array.from(new Set(allLocales));
-  const targetLocales = allLocales.filter(c => c !== mainBaseLocaleCode);
-
-  for (const [fileAbs, strings] of byFile.entries()) {
-    const relFromSrc = strings[0]?.fileRelFromSrc ?? path.relative(srcAbs, fileAbs);
-    const relNoExt = withoutExt(relFromSrc);
-    const outDirAbs = path.join(outRootAbs, relNoExt);
-
-    await ensureDir(outDirAbs);
-
-    const baseFileAbs = path.join(outDirAbs, `${mainBaseLocaleCode}.json`);
-
-    // For base language: recreate=start fresh, merge/overwrite=merge with existing
-    const existingBaseRaw = updateMode === "recreate" ? {} : await readJsonIfExists<LocaleJson>(baseFileAbs, {});
-    const existingBase = normalizeLocaleJson(existingBaseRaw);
-    const existingKeys = getAllKeys(existingBase);
-    const usedKeys = new Set(existingKeys);
-    const base: LocaleJson = { ...existingBase };
-
-    const valToKey = new Map<string, string>();
-    for (const key of existingKeys) {
-      const val = getNestedValue(existingBase, key);
-      if (val) valToKey.set(val, key);
-    }
-
-    const prefix = relNoExt
-      .split("/")
-      .map(segment =>
-        (segment || "")
-          .toUpperCase()
-          .replace(/[^A-Z0-9]+/g, "_")
-          .replace(/^_+|_+$/g, "") || "SEG"
-      )
-      .join(".");
-
-    for (const s of strings) {
-      if (s.isAlreadyTranslated) {
-        if (!getNestedValue(base, s.text)) {
-          setNestedValue(base, s.text, "");
-          stringsAdded++;
-        }
-        continue;
-      }
-      if (valToKey.has(s.text)) continue;
-      const key = makeKey(s.text, usedKeys, prefix);
-      setNestedValue(base, key, s.text);
-      valToKey.set(s.text, key);
-      stringsAdded++;
-    }
-
-    const textKeyMap: Record<string, string> = {};
-    for (const [val, key] of valToKey.entries()) {
-      textKeyMap[val] = key;
-    }
-    keyMapByFile[fileAbs] = textKeyMap;
-
-    // Write base file
-    await fs.writeFile(baseFileAbs, JSON.stringify(base, null, 2) + "\n", "utf8");
-
-    const baseKeys = getAllKeys(base);
-
-    // Generate target language files based on updateMode
-    for (const code of targetLocales) {
-      const targetAbs = path.join(outDirAbs, `${code}.json`);
-      let merged: LocaleJson;
-
-      if (updateMode === "merge") {
-        // merge: Preserve existing translations, add blanks for new/missing/null/empty keys
-        const existingRaw = await readJsonIfExists<LocaleJson>(targetAbs, {});
-        const existing = normalizeLocaleJson(existingRaw);
-        merged = JSON.parse(JSON.stringify(existing));
-
-        for (const key of baseKeys) {
-          const existingVal = getNestedValue(merged, key);
-          // Mark for translation if: missing, null, or empty string
-          if (existingVal === undefined || existingVal === null || existingVal === "") {
-            setNestedValue(merged, key, "");
-          }
-        }
-      } else {
-        // overwrite/recreate: Start fresh with blank values for all keys
-        merged = {};
-        for (const key of baseKeys) {
-          setNestedValue(merged, key, "");
-        }
-      }
-
-      // Write target file
-      await fs.writeFile(targetAbs, JSON.stringify(merged, null, 2) + "\n", "utf8");
-    }
-
-    baseFiles.push({ baseFileAbs, outDirAbs, targets: targetLocales });
-    filesProcessed++;
-  }
-
-  return { baseFiles, filesProcessed, stringsAdded, keyMapByFile };
-}
 
 // Note: Translation JSON file update behavior is controlled by updateMode:
 // - "merge": Preserves existing translations, only adds new keys with blank values

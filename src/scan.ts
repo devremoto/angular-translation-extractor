@@ -1,7 +1,7 @@
 import fg from "fast-glob";
 import * as path from "node:path";
 import { ExtConfig } from "./config";
-import { FoundString } from "./types";
+import { FoundString, RestrictedString } from "./types";
 import { extractFromJsTs } from "./extractJsTs";
 import { extractFromHtml } from "./extractHtml";
 import { normalizeGlobRoot, posixRel } from "./utils";
@@ -11,7 +11,7 @@ const EXTS = ["js", "ts", "html"];
 export async function scanForStrings(opts: {
   workspaceRoot: string;
   cfg: ExtConfig;
-}): Promise<FoundString[]> {
+}): Promise<{ found: FoundString[]; restricted: RestrictedString[] }> {
   const { workspaceRoot, cfg } = opts;
 
   const srcAbs = path.join(workspaceRoot, cfg.srcDir);
@@ -27,6 +27,7 @@ export async function scanForStrings(opts: {
   console.log(`[scan] Found ${files.length} files matching patterns`);
 
   const out: FoundString[] = [];
+  const restricted: RestrictedString[] = [];
 
   for (const fileAbsPosix of files) {
     try {
@@ -39,7 +40,16 @@ export async function scanForStrings(opts: {
         const strings = await extractFromHtml(fileAbs, relFromSrc, cfg.minStringLength, cfg.htmlAttributeNames);
         out.push(...strings);
       } else {
-        const strings = await extractFromJsTs(fileAbs, relFromSrc, cfg.minStringLength, cfg.htmlAttributeNames);
+        const strings = await extractFromJsTs(
+          fileAbs,
+          relFromSrc,
+          cfg.minStringLength,
+          cfg.htmlAttributeNames,
+          cfg.aggressiveMode,
+          cfg.aggressiveModeAllowCallRegex,
+          cfg.aggressiveModeAllowContextRegex,
+          (item) => restricted.push(item)
+        );
         out.push(...strings);
       }
     } catch (fileErr) {
@@ -47,5 +57,5 @@ export async function scanForStrings(opts: {
     }
   }
 
-  return out;
+  return { found: out, restricted };
 }

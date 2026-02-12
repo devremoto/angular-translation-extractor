@@ -33,7 +33,6 @@ export async function loadTranslationKeyMap(
     outputRoot: string,
     languagesJsonPath: string,
     baseLocaleCode: string,
-    onlyMainLanguages: boolean,
     log?: (msg: string) => void
 ): Promise<Map<string, string>> {
     const keyMap = new Map<string, string>();
@@ -63,11 +62,10 @@ export async function loadTranslationKeyMap(
 
         // Determine which language code to search for
         const searchCode = defaultLangCode || baseLocaleCode;
-        const finalSearchCode = onlyMainLanguages ? getMainLanguageCode(searchCode) : searchCode;
+        const finalSearchCode =  searchCode;
 
         logger(`[reverse] 🔍 Default language: ${defaultLangCode || 'not found'}`);
         logger(`[reverse] 🔍 Base locale code: ${baseLocaleCode}`);
-        logger(`[reverse] 🔍 Only main languages: ${onlyMainLanguages}`);
         logger(`[reverse] 🔍 Search code: ${finalSearchCode}`);
         logger(`[reverse] 🔍 Output root: ${outputRoot}`);
 
@@ -547,7 +545,6 @@ export async function reverseTranslateFolderScope(
     outputRoot: string,
     languagesJsonPath: string,
     baseLocaleCode: string,
-    onlyMainLanguages: boolean,
     ignoreGlobs: string[],
     outputChannel?: { appendLine: (line: string) => void }
 ): Promise<{ success: number; failed: number; errors: string[] }> {
@@ -562,7 +559,7 @@ export async function reverseTranslateFolderScope(
         log(`[reverse] 💾 Src dir: ${srcDir}`);
 
         log(`[reverse] Loading translations...`);
-        const keyMap = await loadTranslationKeyMap(workspaceRoot, outputRoot, languagesJsonPath, baseLocaleCode, onlyMainLanguages, log);
+        const keyMap = await loadTranslationKeyMap(workspaceRoot, outputRoot, languagesJsonPath, baseLocaleCode, log);
         log(`[reverse] ✅ Loaded ${keyMap.size} translation keys`);
 
         if (keyMap.size === 0) {
@@ -603,7 +600,6 @@ export async function reverseTranslateFileScope(
     outputRoot: string,
     languagesJsonPath: string,
     baseLocaleCode: string,
-    onlyMainLanguages: boolean,
     ignoreGlobs: string[],
     outputChannel?: { appendLine: (line: string) => void }
 ): Promise<{ success: number; failed: number; errors: string[] }> {
@@ -614,7 +610,7 @@ export async function reverseTranslateFileScope(
 
     try {
         log(`[reverse] Loading translations...`);
-        const keyMap = await loadTranslationKeyMap(workspaceRoot, outputRoot, languagesJsonPath, baseLocaleCode, onlyMainLanguages, log);
+        const keyMap = await loadTranslationKeyMap(workspaceRoot, outputRoot, languagesJsonPath, baseLocaleCode, log);
 
         if (keyMap.size === 0) {
             return {
@@ -655,7 +651,6 @@ export async function reverseTranslateSelectionScope(
     outputRoot: string,
     languagesJsonPath: string,
     baseLocaleCode: string,
-    onlyMainLanguages: boolean,
     ignoreGlobs: string[],
     outputChannel?: { appendLine: (line: string) => void }
 ): Promise<{ success: number; failed: number; errors: string[] }> {
@@ -666,7 +661,7 @@ export async function reverseTranslateSelectionScope(
 
     try {
         log(`[reverse] Loading translations...`);
-        const keyMap = await loadTranslationKeyMap(workspaceRoot, outputRoot, languagesJsonPath, baseLocaleCode, onlyMainLanguages, log);
+        const keyMap = await loadTranslationKeyMap(workspaceRoot, outputRoot, languagesJsonPath, baseLocaleCode,  log);
 
         if (keyMap.size === 0) {
             return {

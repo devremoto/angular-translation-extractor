@@ -11,11 +11,9 @@ export async function generateLoaderArtifacts(opts: {
   languages: LanguageEntry[];
   baseFiles: Array<{ baseFileAbs: string; outDirAbs: string; targets: string[] }>;
   updateMode: "merge" | "overwrite" | "recreate";
-  onlyMainLanguages?: boolean;
-  singleFilePerLanguage?: boolean;
   languagesJsonPath?: string;
 }): Promise<{ loaderPath: string; readmePath: string; languageSelectorPath: string; packageJsonUpdated: boolean; packageJsonReason?: string }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, onlyMainLanguages, singleFilePerLanguage: _singleFilePerLanguage, languagesJsonPath } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, languagesJsonPath } = opts;
 
 
 
@@ -142,9 +140,6 @@ You can configure the extension through VS Code settings (\`settings.json\`) or 
 | \`i18nExtractor.mainTsPath\` | Path to \`main.ts\` | \`{srcDir}/main.ts\` |
 | \`i18nExtractor.angularBootstrapStyle\` | \`standalone\` or \`module\` | \`standalone\` |
 | \`i18nExtractor.updateMode\` | Source source updates: \`merge\`, \`overwrite\`, \`recreate\` | \`merge\` |
-| \`i18nExtractor.onlyGenerateActiveLangs\` | Only generate files for \`active: true\` languages | \`true\` |
-| \`i18nExtractor.onlyMainLanguages\` | Use main language code (en) instead of full (en-US) | \`false\` |
-| \`i18nExtractor.singleFilePerLanguage\` | Consolidate all strings into one file per language | \`true\` |
 | \`i18nExtractor.autoTranslate\` | Automatically translate keys | \`true\` |
 | \`i18nExtractor.autoTranslateDefaultLanguage\` | Translate source language (usually false) | \`false\` |
 | \`i18nExtractor.googleTranslateDelay\` | Delay between translation API calls (ms) | \`500\` |
@@ -313,7 +308,6 @@ Each locale gets its own JSON file. The loader directly loads the JSON file for 
 The loader automatically handles language code fallback:
 - When requesting \`en-US\`, it first tries to load \`en-US.json\`
 - If not found, it falls back to \`en.json\` (main language code)
-- This allows you to use the \`onlyMainLanguages\` configuration to generate fewer JSON files
 
 Example: Instead of maintaining \`en-US.json\`, \`en-GB.json\`, \`en-CA.json\`, you can just have one \`en.json\` that serves all English variants.
 
@@ -441,8 +435,6 @@ Key settings:
 - \`i18nExtractor.autoTranslateDefaultLanguage\` - Translate the default language (default: \`false\`)
 - \`i18nExtractor.outputRoot\` - Where to generate JSON files (default: \`"src/assets/I18n"\`)
 - \`i18nExtractor.googleTranslateDelay\` - Delay between translation requests in milliseconds (default: \`500\`)
-- \`i18nExtractor.onlyMainLanguages\` - Generate only main language codes like \`en\`, \`pt\` (default: \`false\`)
-- \`i18nExtractor.onlyGenerateActiveLangs\` - Only generate files for active languages (default: \`false\`)
 
 
 

@@ -9,7 +9,7 @@ import { getConfig, ExtConfig } from "./config";
 
 const execAsync = promisify(exec);
 import { scanForStrings } from "./scan";
-import { LanguageEntry, FoundString } from "./types";
+import { LanguageEntry, FoundString, RestrictedString } from "./types";
 import { normalizeLanguages } from "./langMeta";
 import { ensureDir, readJsonIfExists, posixRel } from "./utils";
 import { generatePerFileLocales, getAllKeys, getNestedValue } from "./generate";
@@ -462,7 +462,6 @@ async function detectMissingOrDeletedFiles(
   outputRoot: string,
   baseLocaleCode: string,
   languages: LanguageEntry[],
-  onlyMainLanguages: boolean,
   output: vscode.OutputChannel
 ): Promise<{ hasMissingFiles: boolean; missingFiles: string[]; hasEmptyDefaultFiles: boolean; hasIncompleteTranslations: boolean }> {
   const outputAbs = path.join(workspaceRoot, outputRoot);
@@ -525,7 +524,7 @@ async function detectMissingOrDeletedFiles(
       for (const lang of languages) {
         if (!lang.active && lang.code !== baseLocaleCode) continue;
 
-        const langCode = onlyMainLanguages ? lang.code.split('-')[0] : lang.code;
+        const langCode = lang.code;
         if (langCode === baseLocaleCode) continue; // Skip comparing base to itself
 
         const expectedFile = path.join(dir, `${langCode}.json`);
@@ -610,7 +609,6 @@ async function processLocalesAndArtifacts(
     cfg.outputRoot,
     baseLocaleCode,
     langs,
-    cfg.onlyMainLanguages,
     output
   );
 
@@ -634,7 +632,6 @@ async function processLocalesAndArtifacts(
         cfg.outputRoot,
         baseLocaleCode,
         langs,
-        cfg.onlyMainLanguages,
         output
       );
       if (!recheckResult.hasEmptyDefaultFiles) {
@@ -732,7 +729,6 @@ async function processLocalesAndArtifacts(
   const generatedLangs = langs.filter(lang => {
     if (lang.active === true) return true;
     if (lang.code === baseLocaleCode) return true;
-    if (!cfg.onlyGenerateActiveLangs) return true;
     return false;
   });
 
@@ -752,8 +748,6 @@ async function processLocalesAndArtifacts(
     languages: generatedLangs,
     found,
     updateMode: effectiveUpdateMode,
-    onlyMainLanguages: cfg.onlyMainLanguages,
-    singleFilePerLanguage: cfg.singleFilePerLanguage
   });
 
   // Backup default language files immediately after generation
@@ -794,8 +788,6 @@ async function processLocalesAndArtifacts(
       languages: generatedLangs,
       baseFiles: gen.baseFiles,
       updateMode: options.forceUpdateMode ?? cfg.updateMode,
-      onlyMainLanguages: cfg.onlyMainLanguages,
-      singleFilePerLanguage: cfg.singleFilePerLanguage,
       languagesJsonPath: cfg.languagesJsonPath
     });
 
@@ -820,7 +812,7 @@ async function processLocalesAndArtifacts(
 async function runExtractionPipeline(
   context: vscode.ExtensionContext,
   folder: vscode.WorkspaceFolder,
-  action: (root: string, cfg: ExtConfig, output: vscode.OutputChannel) => Promise<FoundString[]>,
+  action: (root: string, cfg: ExtConfig, output: vscode.OutputChannel) => Promise<{ found: FoundString[]; restricted: RestrictedString[] }>,
   options: ProcessOptions = {}
 ) {
   const root = folder.uri.fsPath;
@@ -835,10 +827,14 @@ async function runExtractionPipeline(
       output.appendLine(`[angular-i18n] ⚠ Warning: npm package installation may have failed. Continuing anyway...`);
     }
 
-    const found = await action(root, cfg, output);
-    if (!found) { // allow empty found list to proceed for sync purposes
+    const scanResult = await action(root, cfg, output);
+    if (!scanResult) {
       return null;
     }
+
+    await writeAggressiveModeRestrictedReport(root, cfg, scanResult.restricted, output);
+
+    const found = scanResult.found;
 
     const { gen, generatedLangs, baseLocaleCode } = await processLocalesAndArtifacts(context, root, cfg, found, output, options);
 
@@ -852,6 +848,39 @@ async function runExtractionPipeline(
     vscode.window.showErrorMessage(`Extraction failed: ${msg}`);
     output.appendLine(`[angular-i18n] Failed ❌ ${msg}`);
     throw err;
+  }
+}
+
+async function writeAggressiveModeRestrictedReport(
+  root: string,
+  cfg: ExtConfig,
+  restricted: RestrictedString[],
+  output: vscode.OutputChannel
+) {
+  try {
+    const translateDirAbs = path.join(root, cfg.srcDir, "translate");
+    await ensureDir(translateDirAbs);
+
+    const reportPath = path.join(translateDirAbs, "aggressive-mode-restricted.json");
+    const report = {
+      generatedAt: new Date().toISOString(),
+      aggressiveMode: cfg.aggressiveMode,
+      totalRestricted: restricted.length,
+      restricted: restricted.map(item => ({
+        file: item.fileRelFromSrc,
+        line: item.line,
+        column: item.column,
+        text: item.text,
+        kind: item.kind,
+        reason: item.reason,
+        context: item.context
+      }))
+    };
+
+    await fs.writeFile(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+    output.appendLine(`[aggressive-mode] Report saved: ${path.relative(root, reportPath)} (${restricted.length} restricted string(s))`);
+  } catch (err) {
+    output.appendLine(`[aggressive-mode] Failed to write restricted report: ${err}`);
   }
 }
 
@@ -869,15 +898,13 @@ async function executeAutoTranslate(
   const translateJsonFile = mod.translateJsonFile;
   output.appendLine(`[auto-translate] Starting Google Translate...`);
 
-  const effectiveBaseLocale = cfg.onlyMainLanguages
-    ? baseLocaleCode.split("-")[0]
-    : baseLocaleCode;
+  const effectiveBaseLocale =  baseLocaleCode;
 
   for (const baseFile of baseFiles) {
     const { baseFileAbs, outDirAbs } = baseFile;
 
     for (const lang of generatedLangs) {
-      const langCode = cfg.onlyMainLanguages ? lang.code.split("-")[0] : lang.code;
+      const langCode = lang.code;
       if (langCode === effectiveBaseLocale) continue; // Skip base lang
 
       if (lang.active === false) {
@@ -890,8 +917,8 @@ async function executeAutoTranslate(
       }
 
       const targetLocale = lang.code;
-      const translationTargetLang = cfg.onlyMainLanguages ? targetLocale.split("-")[0] : targetLocale;
-      const outputFileName = cfg.onlyMainLanguages ? translationTargetLang : targetLocale;
+      const translationTargetLang =  targetLocale;
+      const outputFileName =  targetLocale;
 
       try {
         output.appendLine(`[auto-translate] Translating ${path.basename(baseFileAbs)} to ${targetLocale}...`);
@@ -947,9 +974,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     await runExtractionPipeline(context, folders[0], async (root, cfg, output) => {
       output.appendLine(`[angular-i18n] Scanning ${cfg.srcDir}/ (js/ts/html)...`);
-      const found = await scanForStrings({ workspaceRoot: root, cfg });
+      const { found, restricted } = await scanForStrings({ workspaceRoot: root, cfg });
       output.appendLine(`[angular-i18n] Found ${found.length} candidate strings.`);
-      return found;
+      output.appendLine(`[angular-i18n] Restricted by aggressiveMode (${cfg.aggressiveMode}): ${restricted.length}`);
+      return { found, restricted };
     });
 
     vscode.window.showInformationMessage("Angular translation extraction completed.");
@@ -968,11 +996,21 @@ export function activate(context: vscode.ExtensionContext) {
 
       const ext = path.extname(fileAbs).toLowerCase();
       let found: FoundString[] = [];
+      const restricted: RestrictedString[] = [];
 
       if (ext === ".html") {
         found = await extractFromHtml(fileAbs, relFromSrc, cfg.minStringLength, cfg.htmlAttributeNames);
       } else if (ext === ".ts" || ext === ".js") {
-        found = await extractFromJsTs(fileAbs, relFromSrc, cfg.minStringLength, cfg.htmlAttributeNames);
+        found = await extractFromJsTs(
+          fileAbs,
+          relFromSrc,
+          cfg.minStringLength,
+          cfg.htmlAttributeNames,
+          cfg.aggressiveMode,
+          cfg.aggressiveModeAllowCallRegex,
+          cfg.aggressiveModeAllowContextRegex,
+          (item) => restricted.push(item)
+        );
       }
 
       if (found.length === 0) {
@@ -980,7 +1018,8 @@ export function activate(context: vscode.ExtensionContext) {
       } else {
         vscode.window.showInformationMessage(`Extracted ${found.length} strings from file.`);
       }
-      return found;
+      output.appendLine(`[extractFile] Restricted by aggressiveMode (${cfg.aggressiveMode}): ${restricted.length}`);
+      return { found, restricted };
     }, { skipHeavyOps: false }); // keep false to ensure config integrity
   });
 
@@ -1081,7 +1120,7 @@ export function activate(context: vscode.ExtensionContext) {
       rawText: rawText
     };
 
-    const result = await runExtractionPipeline(context, folders[0], async () => [found], {
+    const result = await runExtractionPipeline(context, folders[0], async () => ({ found: [found], restricted: [] }), {
       skipReplacement: true,
       forceUpdateMode: "merge"
     });
@@ -1201,7 +1240,6 @@ export function activate(context: vscode.ExtensionContext) {
           path.join(root, cfg.outputRoot),
           cfg.languagesJsonPath,
           baseLocaleCode,
-          cfg.onlyMainLanguages,
           cfg.ignoreGlobs,
           { appendLine: (msg: string) => output.appendLine(msg) }
         );
@@ -1288,7 +1326,6 @@ export function activate(context: vscode.ExtensionContext) {
           path.join(root, cfg.outputRoot),
           cfg.languagesJsonPath,
           baseLocaleCode,
-          cfg.onlyMainLanguages,
           cfg.ignoreGlobs,
           { appendLine: (msg: string) => output.appendLine(msg) }
         );
@@ -1377,7 +1414,6 @@ export function activate(context: vscode.ExtensionContext) {
           path.join(root, cfg.outputRoot),
           cfg.languagesJsonPath,
           baseLocaleCode,
-          cfg.onlyMainLanguages,
           cfg.ignoreGlobs,
           { appendLine: (msg: string) => output.appendLine(msg) }
         );

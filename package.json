@@ -263,16 +263,6 @@
           },
           "description": "Additional glob patterns to skip during scan (merged with ignoreGlobs)."
         },
-        "i18nExtractor.onlyGenerateActiveLangs": {
-          "type": "boolean",
-          "default": true,
-          "description": "If true, generate JSON files only for languages marked with 'active': true in i18n-languages.json. If false, generate for all languages."
-        },
-        "i18nExtractor.onlyMainLanguages": {
-          "type": "boolean",
-          "default": false,
-          "description": "If true, generate JSON files using only main language codes (e.g., 'en' instead of 'en-US', 'pt' instead of 'pt-BR'). The loader will automatically map region-specific codes to their main language."
-        },
         "i18nExtractor.autoTranslate": {
           "type": "boolean",
           "default": true,
@@ -283,15 +273,44 @@
           "default": false,
           "description": "If false, skip translating the default language marked with 'default': true in i18n-languages.json. The default language is used as the translation source, so it typically doesn't need to be translated."
         },
+        "i18nExtractor.aggressiveMode": {
+          "type": "string",
+          "enum": [
+            "low",
+            "moderate",
+            "high"
+          ],
+          "default": "moderate",
+          "description": "Controls extraction aggressiveness for strings inside function parameters. low: blocks all; moderate: allows multi-word or single-word > 10 chars; high: allows all with no length limit. Restricted strings are reported in src/translate/aggressive-mode-restricted.json."
+        },
+        "i18nExtractor.aggressiveModeAllowCallRegex": {
+          "type": "array",
+          "default": [
+            "^alert\\s*\\(",
+            "^confirm\\s*\\(",
+            "^prompt\\s*\\("
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Array of regex patterns matched against full function call source (example: alert('teste')). If matched, extraction is allowed and has priority over aggressiveMode."
+        },
+        "i18nExtractor.aggressiveModeAllowContextRegex": {
+          "type": "array",
+          "default": [
+            "^window\\.alert\\(arg#1\\)$",
+            "^window\\.confirm\\(arg#1\\)$",
+            "^window\\.prompt\\(arg#1\\)$"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Array of regex patterns matched against function argument context (example: this.toastr.error(arg#1)). If matched, extraction is allowed and has priority over aggressiveMode."
+        },
         "i18nExtractor.googleTranslateDelay": {
           "type": "number",
           "default": 500,
           "description": "Delay between translation requests in milliseconds to avoid rate limiting (minimum 100ms). Used for Google Translate."
-        },
-        "i18nExtractor.singleFilePerLanguage": {
-          "type": "boolean",
-          "default": false,
-          "description": "If true, generate a single file per language in the i18n root directory instead of per-file translations. All strings are consolidated with file-path-based keys."
         }
       }
     }

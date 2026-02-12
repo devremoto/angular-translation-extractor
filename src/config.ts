@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { AggressiveMode } from "./types";
 
 export type ExtConfig = {
   srcDir: string;
@@ -14,16 +15,18 @@ export type ExtConfig = {
   translateCommand: string;
   translateArgsTemplate: string[];
   updateMode: "merge" | "overwrite" | "recreate";
-  onlyGenerateActiveLangs: boolean;
-  onlyMainLanguages: boolean;
   autoTranslate: boolean;
   autoTranslateDefaultLanguage: boolean;
+  aggressiveMode: AggressiveMode;
+  aggressiveModeAllowCallRegex: string[];
+  aggressiveModeAllowContextRegex: string[];
   googleTranslateDelay: number;
-  singleFilePerLanguage: boolean;
 };
 
 export function getConfig(): ExtConfig {
   const cfg = vscode.workspace.getConfiguration("i18nExtractor");
+  const aggressiveMode = cfg.get<AggressiveMode>("aggressiveMode")
+    ?? cfg.get<AggressiveMode>("agressiveMode", "moderate");
   return {
     srcDir: cfg.get<string>("srcDir", "src"),
     outputRoot: cfg.get<string>("outputRoot", "src/assets/i18n"),
@@ -60,11 +63,19 @@ export function getConfig(): ExtConfig {
       "{targetLocale}"
     ]),
     updateMode: cfg.get<"merge" | "overwrite" | "recreate">("updateMode", "merge"),
-    onlyGenerateActiveLangs: cfg.get<boolean>("onlyGenerateActiveLangs", false),
-    onlyMainLanguages: cfg.get<boolean>("onlyMainLanguages", false),
     autoTranslate: cfg.get<boolean>("autoTranslate", true),
     autoTranslateDefaultLanguage: cfg.get<boolean>("autoTranslateDefaultLanguage", false),
+    aggressiveMode,
+    aggressiveModeAllowCallRegex: cfg.get<string[]>("aggressiveModeAllowCallRegex", [
+      "^alert\\s*\\(",
+      "^confirm\\s*\\(",
+      "^prompt\\s*\\("
+    ]),
+    aggressiveModeAllowContextRegex: cfg.get<string[]>("aggressiveModeAllowContextRegex", [
+      "^window\\.alert\\(arg#1\\)$",
+      "^window\\.confirm\\(arg#1\\)$",
+      "^window\\.prompt\\(arg#1\\)$"
+    ]),
     googleTranslateDelay: cfg.get<number>("googleTranslateDelay", 500),
-    singleFilePerLanguage: cfg.get<boolean>("singleFilePerLanguage", true),
   };
 }

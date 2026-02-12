@@ -91,7 +91,7 @@ Create a JSON file (default: `src/app/core/json/language-code.json`) with your t
 
 - `code` (required) - Locale code (e.g., "en-US", "pt-BR")
 - `default` (optional) - Set to `true` to use as default language (overrides `baseLocaleCode` setting)
-- `active` (optional) - Set to `true` to generate JSON for this language when `onlyGenerateActiveLangs` is enabled
+- `active` (optional) - Set to `true` to generate JSON for this language 
 - `rank` (optional) - Sort order for language selection UI
 - `englishName`, `nativeName`, `flag` (auto-generated) - Extension will fill these automatically
 
@@ -269,9 +269,6 @@ You can configure the extension through VS Code settings (`settings.json`) or th
 | `i18nExtractor.mainTsPath`                   | Path to `main.ts`                                       | `{srcDir}/main.ts`                                                                                                                                                                                                          |
 | `i18nExtractor.angularBootstrapStyle`        | `standalone` or `module`                                | `standalone`                                                                                                                                                                                                                |
 | `i18nExtractor.updateMode`                   | Source source updates: `merge`, `overwrite`, `recreate` | `merge`                                                                                                                                                                                                                     |
-| `i18nExtractor.onlyGenerateActiveLangs`      | Only generate files for `active: true` languages        | `true`                                                                                                                                                                                                                      |
-| `i18nExtractor.onlyMainLanguages`            | Use main language code (en) instead of full (en-US)     | `false`                                                                                                                                                                                                                     |
-| `i18nExtractor.singleFilePerLanguage`        | Consolidate all strings into one file per language      | `true`                                                                                                                                                                                                                      |
 | `i18nExtractor.autoTranslate`                | Automatically translate keys                            | `true`                                                                                                                                                                                                                      |
 | `i18nExtractor.autoTranslateDefaultLanguage` | Translate source language (usually false)               | `false`                                                                                                                                                                                                                     |
 | `i18nExtractor.googleTranslateDelay`         | Delay between translation API calls (ms)                | `500`                                                                                                                                                                                                                       |
@@ -401,15 +398,9 @@ This loader is configured to load language files from your output directory.
 
 The generated loader includes intelligent language fallback:
 
-**When `onlyMainLanguages: false`** (specific locales like en-US, pt-BR):
-
 - Loads files named exactly as requested (e.g., `en-US.json`, `pt-BR.json`)
 
-**When `onlyMainLanguages: true`** (main languages like en, pt):
 
-- Request for `en-US` automatically falls back to `en.json`
-- Request for `pt-BR` automatically falls back to `pt.json`
-- Request for `es-MX` automatically falls back to `es.json`
 
 This allows you to generate fewer files while supporting multiple regional variants:
 
@@ -558,24 +549,13 @@ Access settings via: **File → Preferences → Settings** (or `Ctrl+,`) → Sea
 
 | Setting                                 | Default | Description                                                                                                                                                                                                                                                                      |
 | --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `i18nExtractor.onlyGenerateActiveLangs` | `false` | If true, generate JSON files only for languages marked with `"active": true` in the languages JSON file. If false, generate for all languages.                                                                                                                                   |
-| `i18nExtractor.onlyMainLanguages`       | `false` | If true, generate JSON files using only main language codes (e.g., `"en"` instead of `"en-US"`, `"pt"` instead of `"pt-BR"`). The loader automatically maps region-specific codes to their main language. Perfect for reducing file count when regional differences are minimal. |
+
+
 
 **Language Generation Examples:**
 
-With `onlyGenerateActiveLangs: false` and `onlyMainLanguages: false`:
-
 - Generates: `en-US.json`, `en-GB.json`, `pt-BR.json`, `es-ES.json`
 
-With `onlyGenerateActiveLangs: true` and `onlyMainLanguages: false`:
-
-- Generates: Only languages with `"active": true`
-- Example: `en-US.json`, `pt-BR.json` (skips `es-ES.json` if `active: false`)
-
-With `onlyGenerateActiveLangs: false` and `onlyMainLanguages: true`:
-
-- Generates: `en.json`, `pt.json`, `es.json`
-- Loader automatically maps `en-US` → `en`, `en-GB` → `en`, `pt-BR` → `pt`, etc.
 
 ### Filtering Settings
 
@@ -943,7 +923,7 @@ The languages JSON file should contain an array of locale entries. Only `code` i
 | `nativeName`  | ❌ No    | string  | ✅ Yes         | Native display name                                                                                                                                   |
 | `flag`        | ❌ No    | string  | ✅ Yes         | Flag emoji or icon URL                                                                                                                                |
 | `default`     | ❌ No    | boolean | ❌ No          | If true, use as default language (overrides `baseLocaleCode` config)                                                                                  |
-| `active`      | ❌ No    | boolean | ❌ No          | If true (and `onlyGenerateActiveLangs: true`), generate JSON files for this language. Always generates base locale and languages with `active: true`. |
+
 
 ## Features
 

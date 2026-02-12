@@ -1,17 +1,31 @@
 import * as fs from "node:fs/promises";
 import { parse } from "@babel/parser";
 import traverse from "@babel/traverse";
-import { FoundString } from "./types";
+import { AggressiveMode, FoundString, RestrictedString } from "./types";
 import { extractFromHtmlContent } from "./extractHtml";
 
 export async function extractFromJsTs(
   fileAbs: string,
   fileRelFromSrc: string,
   minLen: number,
-  attributeNames: string[]
+  attributeNames: string[],
+  aggressiveMode: AggressiveMode = "moderate",
+  aggressiveModeAllowCallRegex: string[] = [],
+  aggressiveModeAllowContextRegex: string[] = [],
+  onRestricted?: (item: RestrictedString) => void
 ): Promise<FoundString[]> {
   const code = await fs.readFile(fileAbs, "utf8");
-  return extractFromJsTsContent(code, fileAbs, fileRelFromSrc, minLen, attributeNames);
+  return extractFromJsTsContent(
+    code,
+    fileAbs,
+    fileRelFromSrc,
+    minLen,
+    attributeNames,
+    aggressiveMode,
+    aggressiveModeAllowCallRegex,
+    aggressiveModeAllowContextRegex,
+    onRestricted
+  );
 }
 
 export function extractFromJsTsContent(
@@ -19,7 +33,11 @@ export function extractFromJsTsContent(
   fileAbs: string,
   fileRelFromSrc: string,
   minLen: number,
-  attributeNames: string[]
+  attributeNames: string[],
+  aggressiveMode: AggressiveMode = "moderate",
+  aggressiveModeAllowCallRegex: string[] = [],
+  aggressiveModeAllowContextRegex: string[] = [],
+  onRestricted?: (item: RestrictedString) => void
 ): FoundString[] {
   let ast: any;
 
@@ -34,9 +52,11 @@ export function extractFromJsTsContent(
 
   const found: FoundString[] = [];
   const processedTemplateNodes = new WeakSet();
+  const callRegexList = compileRegexList(aggressiveModeAllowCallRegex);
+  const contextRegexList = compileRegexList(aggressiveModeAllowContextRegex);
 
-  function add(kind: FoundString["kind"], text: string, loc: any) {
-    if (!isProbablyUserFacing(text, minLen)) return;
+  function add(kind: FoundString["kind"], text: string, loc: any, ignoreMinLen = false) {
+    if (!isProbablyUserFacing(text, ignoreMinLen ? 0 : minLen)) return;
     if ((kind === "js-string" || kind === "js-template") && looksLikeModuleSpecifier(text)) return;
     if (!loc) return;
 
@@ -158,13 +178,35 @@ export function extractFromJsTsContent(
       if (inIgnoredContext(path)) return;
       if (inControlFlowCondition(path)) return;
 
-      // Strict checking: Only extract if specifically in a message/display context
-      // or if it looks very much like a sentence (has spaces, starts with capital)
       const text = path.node.value;
-      if (!isProbablyUserFacing(text, minLen)) return;
+      const fnArgContext = getFunctionArgumentContext(path, code);
+      const aggressiveDecision = evaluateAggressiveModeForFunctionArg(
+        text,
+        aggressiveMode,
+        !!fnArgContext,
+        fnArgContext,
+        callRegexList,
+        contextRegexList
+      );
+      const ignoreMinLen = aggressiveMode === "high" && !!fnArgContext;
+      if (!isProbablyUserFacing(text, ignoreMinLen ? 0 : minLen)) return;
 
-      if (inMessageContext(path) || isHighConfidenceString(text)) {
-        add("js-string", text, path.node.loc);
+      if (fnArgContext && !aggressiveDecision.allowed) {
+        onRestricted?.({
+          fileAbs,
+          fileRelFromSrc,
+          line: path.node.loc?.start?.line ?? 1,
+          column: path.node.loc?.start?.column ?? 0,
+          text,
+          kind: "js-string",
+          reason: aggressiveDecision.reason,
+          context: fnArgContext.context
+        });
+        return;
+      }
+
+      if (inMessageContext(path) || isHighConfidenceString(text) || (fnArgContext && aggressiveDecision.allowed)) {
+        add("js-string", text, path.node.loc, ignoreMinLen);
       }
     },
 
@@ -175,15 +217,168 @@ export function extractFromJsTsContent(
       if (inControlFlowCondition(path)) return;
 
       const text = path.node.quasis.map((q: any) => q.value.cooked).join("");
-      if (!isProbablyUserFacing(text, minLen)) return;
+      const fnArgContext = getFunctionArgumentContext(path, code);
+      const aggressiveDecision = evaluateAggressiveModeForFunctionArg(
+        text,
+        aggressiveMode,
+        !!fnArgContext,
+        fnArgContext,
+        callRegexList,
+        contextRegexList
+      );
+      const ignoreMinLen = aggressiveMode === "high" && !!fnArgContext;
+      if (!isProbablyUserFacing(text, ignoreMinLen ? 0 : minLen)) return;
 
-      if (inMessageContext(path) || isHighConfidenceString(text)) {
-        add("js-template", text, path.node.loc);
+      if (fnArgContext && !aggressiveDecision.allowed) {
+        onRestricted?.({
+          fileAbs,
+          fileRelFromSrc,
+          line: path.node.loc?.start?.line ?? 1,
+          column: path.node.loc?.start?.column ?? 0,
+          text,
+          kind: "js-template",
+          reason: aggressiveDecision.reason,
+          context: fnArgContext.context
+        });
+        return;
+      }
+
+      if (inMessageContext(path) || isHighConfidenceString(text) || (fnArgContext && aggressiveDecision.allowed)) {
+        add("js-template", text, path.node.loc, ignoreMinLen);
       }
     }
   });
 
   return found;
+}
+
+function evaluateAggressiveModeForFunctionArg(
+  text: string,
+  mode: AggressiveMode,
+  isFunctionArg: boolean,
+  fnArgContext: FunctionArgContext | null,
+  callRegexList: RegExp[],
+  contextRegexList: RegExp[]
+): { allowed: boolean; reason: string } {
+  if (!isFunctionArg) {
+    return { allowed: true, reason: "not-a-function-parameter" };
+  }
+
+  const contextValue = fnArgContext?.context ?? "";
+  const sourceValue = fnArgContext?.callSource ?? "";
+  if (
+    matchesRegexList(contextRegexList, contextValue)
+    || matchesRegexList(callRegexList, sourceValue)
+  ) {
+    return {
+      allowed: true,
+      reason: "allowed-by-regex-override (priority over aggressiveMode)"
+    };
+  }
+
+  if (mode === "high") {
+    return { allowed: true, reason: "allowed-by-high-mode" };
+  }
+
+  if (mode === "low") {
+    return {
+      allowed: false,
+      reason: "restricted by aggressiveMode=low (strings inside function parameters are blocked)"
+    };
+  }
+
+  const normalized = (text || "").trim();
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    return { allowed: true, reason: "allowed-by-moderate-mode-multi-word" };
+  }
+
+  if (words.length === 1 && words[0].length > 10) {
+    return { allowed: true, reason: "allowed-by-moderate-mode-single-word-length>10" };
+  }
+
+  return {
+    allowed: false,
+    reason: "restricted by aggressiveMode=moderate (requires multi-word or single-word > 10 chars in function parameters)"
+  };
+}
+
+type FunctionArgContext = {
+  context: string;
+  callSource: string;
+};
+
+function getFunctionArgumentContext(p: any, code: string): FunctionArgContext | null {
+  const callExpr = p.findParent?.((pp: any) => pp.isCallExpression?.());
+  if (!callExpr?.node?.arguments?.length) {
+    return null;
+  }
+
+  const args = callExpr.node.arguments;
+  const argIndex = args.findIndex((arg: any) => arg === p.node || isAncestorOf(arg, p.node));
+  if (argIndex < 0) {
+    return null;
+  }
+
+  const callee = callExpr.node.callee;
+  const calleeName = getCalleeName(callee);
+  const context = `${calleeName}(arg#${argIndex + 1})`;
+  let callSource = "";
+  if (typeof callExpr.node.start === "number" && typeof callExpr.node.end === "number") {
+    callSource = code.slice(callExpr.node.start, callExpr.node.end);
+  }
+
+  return { context, callSource };
+}
+
+function compileRegexList(patterns: string[]): RegExp[] {
+  const compiled: RegExp[] = [];
+  for (const rawPattern of patterns || []) {
+    if (!rawPattern || typeof rawPattern !== "string") continue;
+    const pattern = rawPattern.trim();
+    if (!pattern) continue;
+
+    try {
+      const slashRegex = pattern.match(/^\/(.*)\/([gimsuy]*)$/);
+      if (slashRegex) {
+        compiled.push(new RegExp(slashRegex[1], slashRegex[2]));
+      } else {
+        compiled.push(new RegExp(pattern));
+      }
+    } catch {
+      continue;
+    }
+  }
+  return compiled;
+}
+
+function matchesRegexList(regexList: RegExp[], value: string): boolean {
+  if (!value || regexList.length === 0) return false;
+  for (const regex of regexList) {
+    regex.lastIndex = 0;
+    if (regex.test(value)) return true;
+  }
+  return false;
+}
+
+function getCalleeName(callee: any): string {
+  if (!callee) return "<unknown>";
+
+  if (callee.type === "Identifier") {
+    return callee.name;
+  }
+
+  if (callee.type === "MemberExpression") {
+    const objectName = getCalleeName(callee.object);
+    const propertyName = callee.property?.name || callee.property?.value || "<prop>";
+    return `${objectName}.${propertyName}`;
+  }
+
+  if (callee.type === "CallExpression") {
+    return getCalleeName(callee.callee);
+  }
+
+  return "<unknown>";
 }
 
 function isHighConfidenceString(t: string): boolean {
