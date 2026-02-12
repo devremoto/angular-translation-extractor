@@ -13,7 +13,7 @@ import { LanguageEntry, FoundString } from "./types";
 import { normalizeLanguages } from "./langMeta";
 import { ensureDir, readJsonIfExists, posixRel } from "./utils";
 import { generatePerFileLocales } from "./generate";
-import { generateLoaderArtifacts, updateManifest } from "./loader-generator";
+import { generateLoaderArtifacts } from "./loader-generator";
 import { replaceExtractedStrings, ensureComponentStructure, addTranslateModuleImport } from "./replaceSource";
 import { updateMainTs } from "./updateMainTs";
 import { updateEnvironment } from "./updateEnvironment";
@@ -292,19 +292,6 @@ async function processLocalesAndArtifacts(
     if (!cfg.onlyGenerateActiveLangs) return true;
     return false;
   });
-
-  // Update manifest (lightweight)
-  try {
-    await updateManifest({
-      workspaceRoot: root,
-      outputRoot: cfg.outputRoot,
-      baseLocaleCode: baseLocaleCode,
-      languages: langs,
-      onlyMainLanguages: cfg.onlyMainLanguages
-    });
-  } catch (err) {
-    output.appendLine(`[angular-i18n] ⚠ Failed to pre-update manifest: ${err}`);
-  }
 
   output.appendLine(`[angular-i18n] Generating locale JSONs under: ${cfg.outputRoot}`);
   const gen = await generatePerFileLocales({

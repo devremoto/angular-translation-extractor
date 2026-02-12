@@ -144,9 +144,6 @@ src/translate/
   ├── language-selector.component.ts       (Language selector component)
   ├── language-selector.component.html     (Component template)
   └── language-selector.component.css      (Component styles)
-
-src/assets/I18n/
-  └── translate-manifest.json             (File manifest)
 ```
 
 ### 6. Use Language Selector
@@ -167,7 +164,7 @@ import { LanguageSelectorComponent } from './translate/tg-language-selector.comp
       <tg-language-selector></tg-language-selector>
 
       or
-      
+
       <!-- Light Mode -->
       <tg-language-selector [mode]="'white'"></tg-language-selector>
 
@@ -365,11 +362,7 @@ Every extraction run also generates a translation loader inside your source dire
 - `src/translate/tg-translate-loader.ts`
 - `src/translate/readme.md`
 
-It also generates a manifest file under the output root:
-
-- `src/assets/I18n/translate-manifest.json`
-
-The loader uses the manifest to load all `{locale}.json` files via Angular `HttpClient` and merges them into a single nested object.
+This loader is configured to load language files from your output directory.
 
 ### Automatic Language Fallback
 
@@ -419,7 +412,7 @@ Every extraction run also generates a ready-to-use **Language Selector Component
 
 - 🎨 **Professional UI** - Modern dropdown with flags, language names, and smooth animations
 - 🌓 **Dark Mode Support** - Automatically adapts to user's color scheme preference
-- 🔄 **Auto-Configuration** - Reads languages from your translate manifest and i18n-languages.json
+- 🔄 **Auto-Configuration** - Reads languages from your i18n-languages.json
 - 💾 **Persistent Selection** - Saves user's language choice to localStorage
 - 🌍 **Language Metadata** - Shows native names, English names, and flags (if configured)
 - ✨ **Standalone Component** - No module imports needed, works with modern Angular
