@@ -99,7 +99,8 @@ export async function replaceExtractedStrings(opts: {
         const tsFile = htmlFile.replace(/\.html$/, ".ts");
         try {
             await fs.access(tsFile);
-            const updated = await addTranslateModuleImport(tsFile, true);
+            const shouldAddToComponent = bootstrapStyle === "standalone";
+            const updated = await addTranslateModuleImport(tsFile, shouldAddToComponent);
             if (updated) tsFilesUpdated++;
         } catch {
             // TS file not found, skip
@@ -108,7 +109,8 @@ export async function replaceExtractedStrings(opts: {
 
     // Add TranslateModule to inline template TS files
     for (const tsFile of tsFilesModified) {
-        const updated = await addTranslateModuleImport(tsFile, true);
+        const shouldAddToComponent = bootstrapStyle === "standalone";
+        const updated = await addTranslateModuleImport(tsFile, shouldAddToComponent);
         if (updated) tsFilesUpdated++;
     }
 
@@ -218,7 +220,7 @@ function _escapeRegExp(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function addTranslateModuleImport(tsFile: string, addToComponentImports = false): Promise<boolean> {
+export async function addTranslateModuleImport(tsFile: string, addToComponentImports = false): Promise<boolean> {
     let content = await fs.readFile(tsFile, "utf8");
     let modified = false;
 
@@ -285,6 +287,13 @@ async function addTranslateModuleImport(tsFile: string, addToComponentImports = 
     return true;
 }
 
+export async function ensureComponentStructure(tsFile: string, bootstrapStyle: "standalone" | "module" = "module"): Promise<boolean> {
+    const shouldAddToComponent = bootstrapStyle === "standalone";
+    const imported = await addTranslateModuleImport(tsFile, shouldAddToComponent);
+    const injected = await addTranslateServiceInjection(tsFile, bootstrapStyle);
+    return imported || injected;
+}
+
 function findLastImportIndex(content: string): number {
     const importRegex = /^import .*?;\s*$/gm;
     let match: RegExpExecArray | null;
@@ -325,7 +334,7 @@ function findImportsArrayRange(componentMetadata: string, importsMatchIndex: num
     return { start: startBracketIndex + 1, end: i - 1 };
 }
 
-async function addTranslateServiceInjection(tsFile: string, bootstrapStyle: "standalone" | "module" = "module"): Promise<boolean> {
+export async function addTranslateServiceInjection(tsFile: string, bootstrapStyle: "standalone" | "module" = "module"): Promise<boolean> {
     let content = await fs.readFile(tsFile, "utf8");
     const original = content;
     let modified = false;

@@ -1,16 +1,22 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
-import * as fsSync from "node:fs";
+import * as fsSync from "node:fs"; // For sync checks if needed
+import { createRequire } from "node:module";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { getConfig, ExtConfig } from "./config";
+
+const execAsync = promisify(exec);
 import { scanForStrings } from "./scan";
 import { LanguageEntry, FoundString } from "./types";
 import { normalizeLanguages } from "./langMeta";
 import { ensureDir, readJsonIfExists, posixRel } from "./utils";
 import { generatePerFileLocales } from "./generate";
 import { generateLoaderArtifacts, updateManifest } from "./loader-generator";
-import { replaceExtractedStrings } from "./replaceSource";
+import { replaceExtractedStrings, ensureComponentStructure, addTranslateModuleImport } from "./replaceSource";
 import { updateMainTs } from "./updateMainTs";
+import { updateEnvironment } from "./updateEnvironment";
 import { runTranslateCommand } from "./translate";
 import { updateAngularJson } from "./updateAngularJson";
 import { captureConsoleLogs } from "./console-capture";
@@ -100,49 +106,82 @@ async function loadAndNormalizeLanguages(workspaceRoot: string, languagesJsonPat
   return normalized;
 }
 
-function isPackageInstalled(pkgName: string, nodeModulesPath: string): boolean {
+function isPackageInstalled(pkgName: string, root: string, output?: vscode.OutputChannel): boolean {
+  // 1. Check if listed in package.json (dependencies or devDependencies)
+  // We want to ensure it is saved in the project.
   try {
-    // Try to resolve from the workspace node_modules
-    const workspacePkgPath = path.join(nodeModulesPath, pkgName);
+    const pkgJsonPath = path.join(root, "package.json");
+    if (fsSync.existsSync(pkgJsonPath)) {
+      const content = fsSync.readFileSync(pkgJsonPath, "utf-8");
+      const pkg = JSON.parse(content);
+      const hasDep = (pkg.dependencies && pkg.dependencies[pkgName]) ||
+        (pkg.devDependencies && pkg.devDependencies[pkgName]);
 
-    // Check if package.json exists in that folder
-    // checking package.json is safer than require.resolve which might look recursively or fail on index files
-    const pkgJsonPath = path.join(workspacePkgPath, "package.json");
-    // We use fs.access to check existence, need to import 'fs' inside or use promise based fs 
-    // Since this is sync in the original code, we can't easily use async fs here without changing signature.
-    // However, the original code used `require.resolve(pkgPath)`.
-    // The issue with `require.resolve(pkgPath)` is that pkgPath is a directory (`.../node_modules/axios`), 
-    // so it tries to find the entry point. If the entry point is main.js, it works. 
-    // But this module resolution happens in the EXTENSION'S context, not the workspace's.
+      if (!hasDep) {
+        if (output) output.appendLine(`[angular-i18n] Package '${pkgName}' is NOT listed in package.json.`);
+        return false;
+      }
+    }
+  } catch (err) {
+    if (output) output.appendLine(`[angular-i18n] Error reading package.json: ${err}`);
+  }
 
-    // BETTER APPROACH: Just check if the folder exists in user's node_modules
-    // It's a heuristic but sufficient for "is it installed".
-
-    // We need to use fs.stat (sync) or similar, but we only have 'fs/promises' imported as 'fs'.
-    // Let's import 'fs' sync just for this check.
-    // const fsSync = require("node:fs"); // We already imported it as fsSync at the top
-    fsSync.accessSync(pkgJsonPath);
+  // 2. Check if resolvable (physically installed)
+  try {
+    // Use Node's module resolution to find packages, which handles hoisting and monorepos correctly
+    // We create a require function relative to the workspace's package.json
+    const requireFunc = createRequire(path.join(root, "package.json"));
+    requireFunc.resolve(pkgName);
     return true;
   } catch {
+    if (output) output.appendLine(`[angular-i18n] Package '${pkgName}' is listed but NOT resolvable (not installed).`);
+    return false;
+  }
+}
+
+async function detectPackageManager(root: string): Promise<string> {
+  const entries = await fs.readdir(root).catch(() => [] as string[]);
+  if (entries.includes("pnpm-lock.yaml")) return "pnpm";
+  if (entries.includes("yarn.lock")) return "yarn";
+  if (entries.includes("bun.lockb")) return "bun";
+  return "npm";
+}
+
+async function installMissingPackages(root: string, packages: string[], output: vscode.OutputChannel): Promise<boolean> {
+  const pm = await detectPackageManager(root);
+  const pkgList = packages.join(" "); // Install as runtime dependency
+  let cmd = `npm install ${pkgList}`;
+
+  if (pm === "pnpm") cmd = `pnpm add ${pkgList}`;
+  else if (pm === "yarn") cmd = `yarn add ${pkgList}`;
+  else if (pm === "bun") cmd = `bun add ${pkgList}`;
+
+  output.appendLine(`[angular-i18n] Installing packages with ${pm}: ${cmd}`);
+
+  try {
+    const { stdout, stderr } = await execAsync(cmd, { cwd: root });
+    output.appendLine(stdout);
+    if (stderr) {
+      // npm often prints warnings to stderr, but invalid failures result in throw/exit code usually.
+      // But let's log it.
+      output.appendLine(`[angular-i18n] (stderr): ${stderr}`);
+    }
+    return true;
+  } catch (error: any) {
+    output.appendLine(`[angular-i18n] Installation failed: ${error.message}`);
     return false;
   }
 }
 
 async function ensurePackagesInstalled(workspaceRoot: string, output: vscode.OutputChannel): Promise<boolean> {
-  const nodeModulesPath = path.join(workspaceRoot, "node_modules");
-
-  // Extension dependencies (axios, fast-glob) are bundled with the extension via esbuild.
-  // We should NOT check for them in the user's project.
-  // The user only needs the runtime angular dependencies.
-
   const missingPackages: string[] = [];
 
   // We only check for the runtime dependencies the user needs in THEIR project
-  if (!isPackageInstalled("@ngx-translate/core", nodeModulesPath)) {
+  if (!isPackageInstalled("@ngx-translate/core", workspaceRoot, output)) {
     missingPackages.push("@ngx-translate/core");
   }
 
-  if (!isPackageInstalled("@ngx-translate/http-loader", nodeModulesPath)) {
+  if (!isPackageInstalled("@ngx-translate/http-loader", workspaceRoot, output)) {
     missingPackages.push("@ngx-translate/http-loader");
   }
 
@@ -151,8 +190,80 @@ async function ensurePackagesInstalled(workspaceRoot: string, output: vscode.Out
     return true;
   }
 
-  output.appendLine(`[angular-i18n] ⚠ Missing packages: ${missingPackages.join(", ")}`);
-  return false;
+  const msg = `Missing required packages: ${missingPackages.join(", ")}. Install them now?`;
+  const result = await vscode.window.showWarningMessage(msg, "Install", "Ignore");
+
+  if (result === "Install") {
+    const installed = await installMissingPackages(workspaceRoot, missingPackages, output);
+    if (installed) {
+      // Re-check to verify they are actually there
+      const stillMissing = missingPackages.filter(p => !isPackageInstalled(p, workspaceRoot, output));
+      if (stillMissing.length > 0) {
+        output.appendLine(`[angular-i18n] ⚠ Installation task finished but packages still seem missing: ${stillMissing.join(", ")}`);
+        // We return true anyway to let the process try to continue, maybe fs check is cached or slow
+        return true;
+      }
+
+      output.appendLine(`[angular-i18n] ✓ Packages installed successfully.`);
+      return true;
+    } else {
+      output.appendLine(`[angular-i18n] ⚠ Installation failed.`);
+      vscode.window.showErrorMessage("Package installation failed. Check terminal for details.");
+      return false;
+    }
+  }
+
+  output.appendLine(`[angular-i18n] ⚠ Could not verify installation of: ${missingPackages.join(", ")}`);
+  output.appendLine(`[angular-i18n] This warning is safe to ignore if you know they are installed or if you are in a non-standard environment.`);
+
+  return true;
+}
+
+async function performAppConfiguration(
+  root: string,
+  cfg: ExtConfig,
+  baseLocaleCode: string,
+  output: vscode.OutputChannel
+) {
+  output.appendLine(`[angular-i18n] Verifying application configuration...`);
+
+  // 1. Angular.json assets
+  try {
+    await updateAngularJson({
+      workspaceRoot: root,
+      outputRoot: cfg.outputRoot,
+      languagesJsonPath: cfg.languagesJsonPath
+    });
+  } catch (err) {
+    output.appendLine(`[angular-i18n] ⚠ Could not update angular.json: ${err}`);
+  }
+
+  // 2. Main.ts providers
+  try {
+    const mainResult = await updateMainTs({
+      workspaceRoot: root,
+      srcDir: cfg.srcDir,
+      mainTsPath: cfg.mainTsPath,
+      baseLocaleCode: baseLocaleCode,
+      bootstrapStyle: cfg.angularBootstrapStyle,
+      updateMode: cfg.updateMode,
+      outputRoot: cfg.outputRoot
+    });
+    if (mainResult.updated) output.appendLine(`[angular-i18n] ✅ main.ts updated`);
+  } catch (err) {
+    output.appendLine(`[angular-i18n] ⚠ Could not verify main.ts: ${(err as Record<string, unknown>)?.message || String(err)}`);
+  }
+
+  // 3. Environment files
+  try {
+    await updateEnvironment({
+      workspaceRoot: root,
+      srcDir: cfg.srcDir,
+      enableTransalationCache: cfg.enableTransalationCache
+    });
+  } catch (err) {
+    output.appendLine(`[angular-i18n] ⚠ Could not update environment: ${err}`);
+  }
 }
 
 async function processLocalesAndArtifacts(
@@ -219,32 +330,15 @@ async function processLocalesAndArtifacts(
       updateMode: cfg.updateMode,
       onlyMainLanguages: cfg.onlyMainLanguages,
       singleFilePerLanguage: cfg.singleFilePerLanguage,
-      enableTransalationCache: cfg.enableTransalationCache
+      enableTransalationCache: cfg.enableTransalationCache,
+      languagesJsonPath: cfg.languagesJsonPath
     });
 
     if (loaderArtifacts.packageJsonUpdated) {
       output.appendLine(`[angular-i18n] ✓ Updated package.json scripts`);
     }
 
-    try {
-      await updateAngularJson({
-        workspaceRoot: root,
-        outputRoot: cfg.outputRoot
-      });
-    } catch (err) {
-      output.appendLine(`[angular-i18n] ⚠ Could not update angular.json: ${err}`);
-    }
-
-    const mainResult = await updateMainTs({
-      workspaceRoot: root,
-      srcDir: cfg.srcDir,
-      mainTsPath: cfg.mainTsPath,
-      baseLocaleCode: baseLocaleCode,
-      bootstrapStyle: cfg.angularBootstrapStyle,
-      updateMode: cfg.updateMode,
-      outputRoot: cfg.outputRoot
-    });
-    if (mainResult.updated) output.appendLine(`[angular-i18n] ✅ main.ts updated`);
+    await performAppConfiguration(root, cfg, baseLocaleCode, output);
   }
 
   output.appendLine(`[angular-i18n] Process complete. Strings added: ${gen.stringsAdded}, Replaced: ${replaceResult.stringsReplaced}`);
@@ -414,6 +508,13 @@ export function activate(context: vscode.ExtensionContext) {
     output.show(true);
 
     try {
+      // Ensure required npm packages are installed
+      output.appendLine(`[angular-i18n] Checking required npm packages...`);
+      const packagesOk = await ensurePackagesInstalled(root, output);
+      if (!packagesOk) {
+        output.appendLine(`[angular-i18n] ⚠ Warning: npm package installation may have failed. Continuing anyway...`);
+      }
+
       const fileAbs = uri.fsPath;
       const srcAbs = path.join(root, cfg.srcDir);
       const relFromSrc = posixRel(srcAbs, fileAbs);
@@ -434,7 +535,9 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const { gen, generatedLangs, baseLocaleCode } = await processLocalesAndArtifacts(root, cfg, found, output, true); // Skip heavy ops for single file
+      // We set skipHeavyOps to false to ensure main.ts and config are updated even for single file
+      // This ensures providers are present if this is the first time running extraction
+      const { gen, generatedLangs, baseLocaleCode } = await processLocalesAndArtifacts(root, cfg, found, output, false);
 
       await executeAutoTranslate(cfg, root, baseLocaleCode, generatedLangs, gen.baseFiles, output);
       await runNgBuild(root, output);
@@ -465,6 +568,24 @@ export function activate(context: vscode.ExtensionContext) {
     let range = new vscode.Range(selection.start, selection.end);
     let text = editor.document.getText(range);
 
+    // Prevent extraction inside <style> tags (in HTML or inline templates in TS/JS)
+    if (ext === ".html" || ext === ".ts" || ext === ".js") {
+      const docText = editor.document.getText();
+      const selectionStart = editor.document.offsetAt(selection.start);
+      // Simple regex to find style blocks
+      const styleRegex = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+      let match: RegExpExecArray | null;
+      while ((match = styleRegex.exec(docText)) !== null) {
+        const styleStart = match.index;
+        const styleEnd = match.index + match[0].length;
+        // Check if selection overlaps with style block
+        if (selectionStart >= styleStart && selectionStart < styleEnd) {
+          vscode.window.showErrorMessage("Cannot extract text inside <style> tags.");
+          return;
+        }
+      }
+    }
+
     // Handle TS/JS quotes expansion
     if (ext === ".ts" || ext === ".js") {
       const docText = editor.document.getText();
@@ -485,20 +606,51 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
+    // Refresh text to the potentially expanded range to ensure we capture what is being replaced
+    // However, for the *content* (found.text), we might want to strip quotes if they exist,
+    // so that the generated key/value doesn't include them.
+    // If we expanded above, we captured quotes. If user selected quotes, we have quotes.
+    // We want `rawText` to HAVE quotes (for replacement), and `text` to NOT HAVE quotes (for extraction).
+
+    // Update rawText range
+    const rawText = editor.document.getText(range);
+
+    // Logic to strip quotes from the text to be extracted
+    let extractedText = rawText;
+    const trimmed = extractedText.trim();
+    if (trimmed.length >= 2) {
+      const first = trimmed.charAt(0);
+      const last = trimmed.charAt(trimmed.length - 1);
+      if ((first === '"' && last === '"') ||
+        (first === "'" && last === "'") ||
+        (first === '`' && last === '`')) {
+        extractedText = trimmed.slice(1, -1);
+      }
+    }
+
     const found: FoundString = {
       fileAbs,
       fileRelFromSrc,
       kind: ext === ".html" ? "html-text" : "js-string",
       line: range.start.line + 1,
       column: range.start.character,
-      text: text, // Use original selection text as the key source
-      rawText: editor.document.getText(range) // What we replace
+      text: extractedText,
+      rawText: rawText
     };
 
     try {
+      // Ensure required npm packages are installed
+      const output = vscode.window.createOutputChannel("Angular Translation Extractor");
+      output.show(true);
+      output.appendLine(`[angular-i18n] Checking required npm packages...`);
+      const packagesOk = await ensurePackagesInstalled(root, output);
+      if (!packagesOk) {
+        output.appendLine(`[angular-i18n] ⚠ Warning: npm package installation may have failed. Continuing anyway...`);
+      }
+
       // We use 'processLocalesAndArtifacts' parts manually to separate generation from replacement
       const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
-      const output = vscode.window.createOutputChannel("Angular Translation Extractor");
+
       const defaultLang = normalizeLanguages(langs).find(l => l.default === true)?.code;
       const baseLocaleCode = defaultLang ?? cfg.baseLocaleCode;
 
@@ -525,6 +677,25 @@ export function activate(context: vscode.ExtensionContext) {
       // Run auto-translate
       await executeAutoTranslate(cfg, root, baseLocaleCode, generatedLangs, gen.baseFiles, output);
 
+      // Generate loader artifacts (including tg-language-selector)
+      const loaderArtifacts = await generateLoaderArtifacts({
+        workspaceRoot: root,
+        srcDir: cfg.srcDir,
+        outputRoot: cfg.outputRoot,
+        baseLocaleCode: baseLocaleCode,
+        languages: generatedLangs,
+        baseFiles: gen.baseFiles,
+        updateMode: "merge", // match the updateMode used in generatePerFileLocales for selection
+        onlyMainLanguages: cfg.onlyMainLanguages,
+        singleFilePerLanguage: cfg.singleFilePerLanguage,
+        enableTransalationCache: cfg.enableTransalationCache,
+        languagesJsonPath: cfg.languagesJsonPath
+      });
+
+      if (loaderArtifacts.packageJsonUpdated) {
+        output.appendLine(`[angular-i18n] ✓ Updated package.json scripts`);
+      }
+
       // Calculate replacement
       const keyMap = gen.keyMapByFile[fileAbs];
       if (!keyMap || !keyMap[found.text]) {
@@ -545,6 +716,31 @@ export function activate(context: vscode.ExtensionContext) {
         }
         editBuilder.replace(range, replacement);
       });
+
+      // Save to disk to ensure ensureComponentStructure works on latest content
+      await editor.document.save();
+
+      // Ensure Angular component has proper imports/injections
+      if (ext === ".ts") {
+        await ensureComponentStructure(fileAbs, cfg.angularBootstrapStyle);
+      } else if (ext === ".html") {
+        // Try to find companion .ts
+        const potentialTs = fileAbs.replace(/\.html$/, ".ts");
+        try {
+          // If TS exists: 
+          // 1. Check if we need TranslateModule (only if standalone)
+          // 2. We don't need TranslateService injection for pipe usage in HTML
+          if (cfg.angularBootstrapStyle === "standalone") {
+            await fs.access(potentialTs);
+            await addTranslateModuleImport(potentialTs, true);
+          }
+        } catch {
+          // No companion TS found
+        }
+      }
+
+      // Ensure application configuration (angular.json, main.ts, environments) is correct
+      await performAppConfiguration(root, cfg, baseLocaleCode, output);
 
       await runNgBuild(root, output);
 

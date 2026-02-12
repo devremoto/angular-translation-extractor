@@ -164,7 +164,6 @@
             "**/build/**",
             "**/.next/**",
             "**/.angular/**",
-            "**/app.html",
             "**/index.html",
             "**/assets/**",
             "**/environments/**",

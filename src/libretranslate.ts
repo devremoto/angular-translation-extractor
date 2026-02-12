@@ -41,7 +41,7 @@ async function translateText(text: string, targetLang: string, sourceLang?: stri
     try {
         // Use the API-compatible main language code
         return await doTranslate(apiTargetLang);
-    } catch (err: any) {
+    } catch {
         // If it fails, the text will be returned unchanged
         // This is better than throwing and losing the key entirely
         return text;
@@ -106,7 +106,7 @@ export async function translateJsonFile(opts: {
             const existingData = await fs.readFile(outputFile, "utf8");
             existingTranslations = JSON.parse(existingData);
             onProgress(`[libretranslate] Loaded existing translations from ${outputFile}`);
-        } catch (err) {
+        } catch {
             onProgress(`[libretranslate] No existing translations found, will create new file`);
         }
 

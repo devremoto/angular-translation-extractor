@@ -27,7 +27,7 @@ export async function updateMainTs(opts: {
     let content: string;
     try {
         content = await fs.readFile(abs, "utf8");
-    } catch (_err) {
+    } catch {
         return { updated: false, reason: "main.ts not found", mainTsPath: abs };
     }
 
@@ -41,9 +41,18 @@ export async function updateMainTs(opts: {
     }
 
     const importLines = new Set<string>();
+    const hasProvideHttpClientImport = /\bprovideHttpClient\b/.test(content);
+
     if (!content.includes("@angular/common/http")) {
-        importLines.add('import { HttpClient } from "@angular/common/http";');
+        importLines.add('import { HttpClient, provideHttpClient } from "@angular/common/http";');
+    } else if (!hasProvideHttpClientImport) {
+        // Add provideHttpClient to existing import
+        content = content.replace(
+            /import\s+\{([^}]*)\}\s+from\s+["']@angular\/common\/http["']/,
+            (m, inner) => `import { ${inner.trim()}, provideHttpClient } from "@angular/common/http"`
+        );
     }
+
     if (!content.includes("@ngx-translate/core")) {
         importLines.add('import { TranslateLoader, TranslateModule } from "@ngx-translate/core";');
     }
@@ -66,7 +75,13 @@ export async function updateMainTs(opts: {
 
     content = upsertHttpLoaderFactory(content, outputRootRelative, updateMode);
 
-    const providerExpr = `importProvidersFrom(TranslateModule.forRoot({\n        defaultLanguage: "${baseLocaleCode}",\n        loader: {\n          provide: TranslateLoader,\n          useFactory: HttpLoaderFactory,\n          deps: [HttpClient]\n        }\n      }))`;
+    let providerExpr = `importProvidersFrom(TranslateModule.forRoot({\n        defaultLanguage: "${baseLocaleCode}",\n        loader: {\n          provide: TranslateLoader,\n          useFactory: HttpLoaderFactory,\n          deps: [HttpClient]\n        }\n      }))`;
+
+    // Ensure provideHttpClient() is present if not already called
+    // We check for "provideHttpClient(" to avoid false positives on imports
+    if (!content.includes("provideHttpClient(")) {
+        providerExpr = `provideHttpClient(),\n    ${providerExpr}`;
+    }
 
     let bootstrapUpdated = false;
     const shouldUpdateBootstrap = !hasTranslateModule || updateMode !== 'merge';
@@ -175,10 +190,17 @@ function updateBootstrapApplication(content: string, providerExpr: string): stri
         newArgs = `${appArg}, ${injectProvidersIntoObject(configArg, providerExpr)}`;
     } else {
         const configVar = configArg.trim();
-        if (!content.includes("angularTranslationConfig")) {
-            const configSnippet = `\nconst angularTranslationConfig = {\n  ...${configVar},\n  providers: [\n    ...(${configVar}.providers ?? []),\n    ${providerExpr}\n  ]\n};\n`;
-            content = content.slice(0, end + 1) + configSnippet + content.slice(end + 1);
+        // Check if we are using an existing variable and if we need to create the wrapper
+        if (!content.includes("const angularTranslationConfig =")) {
+            const configSnippet = `const angularTranslationConfig = {\n  ...${configVar},\n  providers: [\n    ...(${configVar}.providers ?? []),\n    ${providerExpr}\n  ]\n};\n\n`;
+
+            // Insert snippet BEFORE the bootstrap call
+            const updatedCall = `bootstrapApplication(${appArg}, angularTranslationConfig)`;
+            return content.slice(0, start) + configSnippet + updatedCall + content.slice(end + 1);
         }
+
+        // If config already exists, we assume it's correctly placed or we manually check placement?
+        // For simplicity, if it exists, we just update the call to use it (or it might be already used).
         newArgs = `${appArg}, angularTranslationConfig`;
     }
 
@@ -204,9 +226,13 @@ function updateBootstrapModule(content: string, providerExpr: string): string | 
         newArgs = `${moduleArg}, ${injectProvidersIntoObject(configArg, providerExpr)}`;
     } else {
         const configVar = configArg.trim();
-        if (!content.includes("angularTranslationConfig")) {
-            const configSnippet = `\nconst angularTranslationConfig = {\n  ...${configVar},\n  providers: [\n    ...(${configVar}.providers ?? []),\n    ${providerExpr}\n  ]\n};\n`;
-            content = content.slice(0, end + 1) + configSnippet + content.slice(end + 1);
+        // Check if we are using an existing variable and if we need to create the wrapper
+        if (!content.includes("const angularTranslationConfig =")) {
+            const configSnippet = `const angularTranslationConfig = {\n  ...${configVar},\n  providers: [\n    ...(${configVar}.providers ?? []),\n    ${providerExpr}\n  ]\n};\n\n`;
+
+            // Insert snippet BEFORE the bootstrapCall
+            const updatedCall = `bootstrapModule(${moduleArg}, angularTranslationConfig)`;
+            return content.slice(0, start) + configSnippet + updatedCall + content.slice(end + 1);
         }
         newArgs = `${moduleArg}, angularTranslationConfig`;
     }

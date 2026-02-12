@@ -149,6 +149,36 @@ src/assets/I18n/
   └── translate-manifest.json             (File manifest)
 ```
 
+### 6. Use Language Selector
+
+Import the standalone component and use it in your templates. It supports both light and dark modes:
+
+```typescript
+import { Component } from '@angular/core';
+import { LanguageSelectorComponent } from './translate/tg-language-selector.component';
+
+@Component({
+  selector: 'app-header',
+  standalone: true,
+  imports: [LanguageSelectorComponent],
+  template: `
+    <nav>
+      <!-- Default Light Mode -->
+      <tg-language-selector></tg-language-selector>
+
+      or
+      
+      <!-- Light Mode -->
+      <tg-language-selector [mode]="'white'"></tg-language-selector>
+
+      <!-- Dark Mode -->
+      <tg-language-selector [mode]="'dark'"></tg-language-selector>
+    </nav>
+  `
+})
+export class HeaderComponent {}
+```
+
 ## Example Extraction
 
 ### JavaScript/TypeScript

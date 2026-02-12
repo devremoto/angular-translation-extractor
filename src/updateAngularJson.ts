@@ -4,10 +4,11 @@ import * as path from "path";
 export interface UpdateAngularJsonOptions {
     workspaceRoot: string;
     outputRoot: string;
+    languagesJsonPath?: string;
 }
 
 export async function updateAngularJson(opts: UpdateAngularJsonOptions): Promise<void> {
-    const { workspaceRoot, outputRoot } = opts;
+    const { workspaceRoot, outputRoot, languagesJsonPath } = opts;
 
     const angularJsonPath = path.join(workspaceRoot, "angular.json");
 
@@ -50,6 +51,25 @@ export async function updateAngularJson(opts: UpdateAngularJsonOptions): Promise
             // Add outputRoot to assets
             buildOptions.assets.push(outputRoot);
             modified = true;
+        }
+
+        // Handle languagesJsonPath if provided
+        if (languagesJsonPath) {
+            const langFileExists = buildOptions.assets.some((asset: string | object) => {
+                if (typeof asset === "string") {
+                    return asset === languagesJsonPath || asset.endsWith(path.basename(languagesJsonPath));
+                }
+                return false;
+            });
+
+            if (!langFileExists) {
+                // If the file is inside src/assets, it usually doesn't hurt to explicitly add it 
+                // to ensure it's copied if the folder glob isn't covering it.
+                // However, check if typical "src/assets" exists?
+                // We'll just add it.
+                buildOptions.assets.push(languagesJsonPath);
+                modified = true;
+            }
         }
     }
 

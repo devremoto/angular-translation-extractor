@@ -39,8 +39,9 @@ export async function generateLoaderArtifacts(opts: {
   onlyMainLanguages?: boolean;
   singleFilePerLanguage?: boolean;
   enableTransalationCache?: boolean;
+  languagesJsonPath?: string;
 }): Promise<{ loaderPath: string; readmePath: string; languageSelectorPath: string; packageJsonUpdated: boolean; packageJsonReason?: string }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, onlyMainLanguages, singleFilePerLanguage: _singleFilePerLanguage, enableTransalationCache = false } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, onlyMainLanguages, singleFilePerLanguage: _singleFilePerLanguage, enableTransalationCache = false, languagesJsonPath } = opts;
 
   // Ensure environment is updated to support enabling cache
   await updateEnvironment({ workspaceRoot, srcDir, enableTransalationCache });
@@ -59,108 +60,31 @@ export async function generateLoaderArtifacts(opts: {
 
   const loaderSource = `import { HttpClient } from "@angular/common/http";
 import { TranslateLoader } from "@ngx-translate/core";
-import { forkJoin, Observable, of } from "rxjs";
-import { map, switchMap, catchError, tap } from "rxjs/operators";
+import { Observable, of } from "rxjs";
+import { map, catchError, tap } from "rxjs/operators";
 import { environment } from "../environments/environment";
 
-export type TgTranslations = Record<string, unknown>;
+export type TgTranslations = Record<string, any>;
 
 export class TgTranslationLoader implements TranslateLoader {
   constructor(
     private http: HttpClient,
     private prefix: string = "${outputRootRelative}",
     private suffix: string = ".json",
-    private manifestFile: string = "translate-manifest.json",
     private cacheEnabled: boolean = typeof (environment as any).enableTransalationCache !== "undefined" ? (environment as any).enableTransalationCache : ${enableTransalationCache}
   ) {}
 
-  public getTranslation(lang: string): Observable<TgTranslations> {
-    const cacheKey = \`tg-translation-\${lang}\`;
-    
-    // Check sessionStorage cache first
-    if (this.cacheEnabled) {
-      const cached = sessionStorage.getItem(cacheKey);
-      if (cached) {
-        try {
-          return of(JSON.parse(cached));
-        } catch (err) {
-          console.warn(\`[TgTranslationLoader] Cache parse error, reloading: \${err}\`);
-        }
-      }
-    }
+  public getTranslation(lang: string): Observable<TgTranslations> { 
 
-    const normalizedPrefix = this.prefix.endsWith("/") ? this.prefix : this.prefix + "/";
-    const manifestUrl = normalizedPrefix + this.manifestFile;
-    
-    return this.http.get<{ locales?: Record<string, string[]> }>(manifestUrl).pipe(
-      map(manifest => {
-        // Try specific language first (e.g., "en-US")
-        let files = manifest?.locales?.[lang] ?? [];
-        
-        // If not found, try main language code (e.g., "en" from "en-US")
-        if (!files.length && lang.includes("-")) {
-          const mainLang = lang.split("-")[0].toLowerCase();
-          files = manifest?.locales?.[mainLang] ?? [];
-        }
-        
-        return files;
-      }),
-      switchMap(files => {
-        if (!files.length) {
-          console.warn(\`[TgTranslationLoader] No translation files found for language: \${lang}\`);
-          return of({} as TgTranslations);
-        }
-        const urls = files.map(file => normalizedPrefix + file.replace(/^\\//, ""));
-        return forkJoin(
-          urls.map(url => this.http.get<TgTranslations>(url).pipe(
-            catchError(err => {
-              console.error(\`[TgTranslationLoader] ✗ Failed to load \${url}:\`, err);
-              return of({} as TgTranslations);
-            })
-          ))
-        ).pipe(
-          map(chunks => {
-            const merged = chunks.reduce((acc, chunk) => deepMerge(acc, chunk), {} as TgTranslations);
-            
-            // Cache in sessionStorage
-            if (this.cacheEnabled) {
-              try {
-                sessionStorage.setItem(cacheKey, JSON.stringify(merged));
-              } catch (err) {
-                console.warn(\`[TgTranslationLoader] Warning: Could not cache translation: \${err}\`);
-              }
-            }
-            
-            return merged;
-          })
-        );
-      }),
+    const url = \`\${this.prefix}\${lang}\${this.suffix}\`;
+
+    return this.http.get<TgTranslations>(url).pipe(    
       catchError(err => {
-        console.error(\`[TgTranslationLoader] ✗ Failed to load manifest from \${manifestUrl}:\`, err);
-        console.error(\`[TgTranslationLoader] Make sure:\`);
-        console.error(\`  1. The manifest file exists at: \${manifestUrl}\`);
-        console.error(\`  2. The i18n folder is included in angular.json assets array\`);
-        console.error(\`  3. The Angular dev server is serving the files correctly\`);
+        console.error(\`[TgTranslationLoader] ✗ Failed to load \${url}:\`, err);
         return of({} as TgTranslations);
       })
     );
   }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function deepMerge(target: TgTranslations, source: TgTranslations): TgTranslations {
-  for (const [key, value] of Object.entries(source)) {
-    const existing = target[key];
-    if (isPlainObject(existing) && isPlainObject(value)) {
-      target[key] = deepMerge({ ...existing }, value as TgTranslations);
-    } else {
-      target[key] = value;
-    }
-  }
-  return target;
 }
 `;
 
@@ -441,7 +365,7 @@ If translations fail:
 The loader reads locale JSON files from:
 - \`${outputRoot}\`
 
-Each source file gets its own folder, and each locale gets its own JSON file. The loader uses a manifest file (\`translate-manifest.json\`) to know which JSONs to load for a given locale and merges them into one nested object.
+Each locale gets its own JSON file. The loader directly loads the JSON file for the requested language.
 
 ## Language Code Fallback
 
@@ -510,7 +434,7 @@ export class AppComponent {
 \`\`\`
 Using the Language Selector
 
-Import the standalone component and use it in your templates:
+Import the standalone component and use it in your templates. You can configure the mode (\`white\` or \`dark\`):
 
 \`\`\`typescript
 import { Component } from '@angular/core';
@@ -523,7 +447,16 @@ import { LanguageSelectorComponent } from './translate/tg-language-selector.comp
   template: \`
     <nav>
       <h1>My App</h1>
+      <!-- Default (white) mode -->
       <tg-language-selector></tg-language-selector>
+
+      or
+      
+      <!-- Light Mode -->
+      <tg-language-selector [mode]="'white'"></tg-language-selector>
+
+      <!-- Dark mode -->
+      <tg-language-selector [mode]="'dark'"></tg-language-selector>
     </nav>
   \`
 })
@@ -537,7 +470,6 @@ The loader accepts the following options:
 
 - \`prefix\` (optional): Base URL to the locale root folder (default: \`"${outputRootRelative}"\`)
 - \`suffix\` (optional): File suffix for JSON files (default: \`".json"\`)
-- \`manifestFile\` (optional): Manifest file name (default: \`"translate-manifest.json"\`)
 
 Example with custom configuration:
 \`\`\`typescript
@@ -545,8 +477,7 @@ export function HttpLoaderFactory(http: HttpClient): TranslateLoader {
   return new TgTranslationLoader(
     http,
     "./custom/path/",  // custom prefix
-    ".json",           // suffix
-    "manifest.json"    // custom manifest file name
+    ".json"            // suffix
   );
 }
 \`\`\`
@@ -555,7 +486,6 @@ export function HttpLoaderFactory(http: HttpClient): TranslateLoader {
 
 - Loader: \`${path.posix.join(srcDir, "translate", "tg-translate-loader.ts")}\`
 - Readme: \`${path.posix.join(srcDir, "translate", "readme.md")}\`
-- Manifest: \`${path.posix.join(outputRoot, "translate-manifest.json")}\`
 
 ## Configured Languages
 
@@ -606,15 +536,26 @@ Run the command: **Angular Translation Extractor: Extract Strings** from the VS 
     await fs.writeFile(readmePath, readme, "utf8");
   }
 
-  // Always update manifest to reflect current state of files
-  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  // Manifest generation removed as per user request to rely on standard loading behavior
+  // await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
 
   // Generate language selector component
   const selectorComponentPath = path.join(translateDirAbs, "tg-language-selector.component.ts");
   const selectorTemplatePath = path.join(translateDirAbs, "tg-language-selector.component.html");
   const selectorStylePath = path.join(translateDirAbs, "tg-language-selector.component.css");
 
-  const selectorComponent = getLanguageSelectorComponent(outputRootRelative);
+  // Determine runtime URL for languages JSON
+  let languagesJsonUrl = 'assets/i18n-languages.json';
+  if (languagesJsonPath) {
+    // We try to make it relative to srcDir, assuming srcDir is the web root (or effectively so for assets)
+    // If srcDir is "src", and languagesJsonPath is "src/assets/foo.json", result is "assets/foo.json"
+    const rel = path.relative(srcDir, languagesJsonPath);
+    if (!rel.startsWith('..') && !path.isAbsolute(rel)) {
+      languagesJsonUrl = rel.replace(/\\/g, '/');
+    }
+  }
+
+  const selectorComponent = getLanguageSelectorComponent(languagesJsonUrl);
   const selectorTemplate = getLanguageSelectorTemplate();
   const selectorStyle = getLanguageSelectorStyle();
 
@@ -717,12 +658,12 @@ async function shouldWriteFile(fileAbs: string, allowOverwrite: boolean): Promis
   }
 }
 
-function getLanguageSelectorComponent(outputRootRelative: string): string {
+function getLanguageSelectorComponent(languagesJsonUrl: string): string {
   return `/* 
  * This file is auto-generated by the Angular Translation Extractor extension.
  * Any manual changes to this file may be lost when the extension runs again.
  */
-import { Component, OnInit } from '@angular/core';
+import { Component, input, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TranslateService } from '@ngx-translate/core';
 import { HttpClient } from '@angular/common/http';
@@ -742,9 +683,14 @@ export interface Language {
   standalone: true,
   imports: [CommonModule],
   templateUrl: './tg-language-selector.component.html',
-  styleUrls: ['./tg-language-selector.component.css']
+  styleUrls: ['./tg-language-selector.component.css'],
+  host: {
+    '[class.white-mode]': 'mode() === "white"',
+    '[class.dark-mode]': 'mode() === "dark"'
+  }
 })
 export class LanguageSelectorComponent implements OnInit {
+  mode = input<'white' | 'dark'>('white');
   languages: Language[] = [];
   currentLanguage: Language | null = null;
   isOpen = false;
@@ -755,58 +701,58 @@ export class LanguageSelectorComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    this.loadLanguages();
-    
-    // Set initial language
-    const currentLang = this.translateService.currentLang || this.translateService.defaultLang;
-    if (currentLang) {
-      this.currentLanguage = this.languages.find(l => l.code === currentLang) || null;
+
+    if (this.getLanguagesFromSession()) {
+      return;
     }
+    this.loadLanguages();
   }
 
   private loadLanguages(): void {
-    // Try to load from manifest or languages JSON
-    this.http.get<{ locales: Record<string, string[]> }>('${outputRootRelative}translate-manifest.json')
-      .subscribe({
-        next: (manifest) => {
-          this.languages = Object.keys(manifest.locales).map(code => ({ code }));
-          this.tryLoadLanguageMetadata();
-        },
-        error: () => {
-          // Fallback: try to load from i18n-languages.json
-          this.tryLoadLanguageMetadata();
-        }
-      });
-  }
 
-  private tryLoadLanguageMetadata(): void {
-    this.http.get<Language[]>('assets/i18n-languages.json')
+    this.http.get<Language[]>('${languagesJsonUrl}')
       .subscribe({
         next: (langs) => {
-          if (this.languages.length === 0) {
-            this.languages = langs.filter(l => l.active !== false);
-          } else {
-            // Merge metadata
-            this.languages = this.languages.map(lang => {
-              const metadata = langs.find(l => l.code === lang.code);
-              return metadata ? { ...lang, ...metadata } : lang;
-            });
-          }
-          
+          this.languages = langs.filter(l => l.active !== false);
           this.languages.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+
+          var defaultLang = this.languages.find(l => l.default) || this.languages[0];
+          if (defaultLang) {
+            this.translateService.use(defaultLang.code);
+          }
           
           const currentLang = this.translateService.currentLang || this.translateService.defaultLang;
           if (currentLang) {
             this.currentLanguage = this.languages.find(l => l.code === currentLang) || this.languages[0] || null;
+          } else if (this.languages.length > 0) {
+            this.currentLanguage = this.languages[0];
           }
+          sessionStorage.setItem('languages', JSON.stringify(this.languages));
         },
-        error: () => {
-          // Use basic language list without metadata
+        error: (err) => {
+          // Fallback or error handling
           if (!this.currentLanguage && this.languages.length > 0) {
             this.currentLanguage = this.languages[0];
           }
+          console.error('Failed to load languages from ${languagesJsonUrl}', err);
         }
       });
+  }
+
+  getLanguagesFromSession() {
+    const savedLanguages = sessionStorage.getItem('languages');
+    const savedLangCode = sessionStorage.getItem('selectedLanguage');
+
+    if (savedLanguages) {
+      this.languages = JSON.parse(savedLanguages) as Language[];
+      const savedLang = this.languages.find(l => l.code === savedLangCode);
+      if (savedLang) {
+        this.currentLanguage = savedLang;
+        this.translateService.use(savedLang.code);
+        return this.currentLanguage;
+      }
+    }
+    return null;
   }
 
   selectLanguage(language: Language): void {
@@ -814,8 +760,8 @@ export class LanguageSelectorComponent implements OnInit {
     this.translateService.use(language.code);
     this.isOpen = false;
     
-    // Save preference to localStorage
-    localStorage.setItem('selectedLanguage', language.code);
+    // Save preference to sessionStorage
+    sessionStorage.setItem('selectedLanguage', language.code);
   }
 
   toggleDropdown(): void {
@@ -881,13 +827,49 @@ function getLanguageSelectorStyle(): string {
   z-index: 1000;
 }
 
+/* Default white mode variables */
+:host {
+  --background: #ffffff;
+  --border-color: #e0e0e0;
+  --hover-background: #f5f5f5;
+  --hover-border-color: #d0d0d0;
+  --text-color: #333333;
+  --icon-color: #666666;
+  --selected-background: #e3f2fd;
+  --selected-text-color: #1976d2;
+}
+
+/* White mode (explicit) */
+:host(.white-mode) {
+  --background: #ffffff;
+  --border-color: #e0e0e0;
+  --hover-background: #f5f5f5;
+  --hover-border-color: #d0d0d0;
+  --text-color: #333333;
+  --icon-color: #666666;
+  --selected-background: #e3f2fd;
+  --selected-text-color: #1976d2;
+}
+
+/* Dark mode */
+:host(.dark-mode) {
+  --background: #2d2d2d;
+  --border-color: #404040;
+  --hover-background: #3d3d3d;
+  --hover-border-color: #505050;
+  --text-color: #e0e0e0;
+  --icon-color: #b0b0b0;
+  --selected-background: #1565c0;
+  --selected-text-color: #ffffff;
+}
+
 .current-language {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: var(--background, #ffffff);
-  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--background);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -895,8 +877,8 @@ function getLanguageSelectorStyle(): string {
 }
 
 .current-language:hover {
-  background: var(--hover-background, #f5f5f5);
-  border-color: var(--hover-border-color, #d0d0d0);
+  background: var(--hover-background);
+  border-color: var(--hover-border-color);
 }
 
 .flag-icon {
@@ -911,12 +893,12 @@ function getLanguageSelectorStyle(): string {
   flex: 1;
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-color, #333333);
+  color: var(--text-color);
 }
 
 .dropdown-icon {
   transition: transform 0.2s ease;
-  color: var(--icon-color, #666666);
+  color: var(--icon-color);
 }
 
 .dropdown-icon.open {
@@ -928,8 +910,8 @@ function getLanguageSelectorStyle(): string {
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  background: var(--background, #ffffff);
-  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--background);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   overflow: hidden;
@@ -943,6 +925,7 @@ function getLanguageSelectorStyle(): string {
     opacity: 0;
     transform: translateY(-8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -959,12 +942,12 @@ function getLanguageSelectorStyle(): string {
 }
 
 .language-option:hover {
-  background: var(--hover-background, #f5f5f5);
+  background: var(--hover-background);
 }
 
 .language-option.selected {
-  background: var(--selected-background, #e3f2fd);
-  color: var(--selected-text-color, #1976d2);
+  background: var(--selected-background);
+  color: var(--selected-text-color);
 }
 
 .language-option .language-name {
@@ -972,7 +955,7 @@ function getLanguageSelectorStyle(): string {
 }
 
 .check-icon {
-  color: var(--selected-text-color, #1976d2);
+  color: var(--selected-text-color);
 }
 
 .language-backdrop {
@@ -1000,22 +983,6 @@ function getLanguageSelectorStyle(): string {
 
 .language-dropdown::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover-color, #999999);
-}
-
-/* Dark mode support (optional - uses CSS variables) */
-@media (prefers-color-scheme: dark) {
-  .language-selector {
-    --background: #2d2d2d;
-    --hover-background: #3d3d3d;
-    --border-color: #404040;
-    --hover-border-color: #505050;
-    --text-color: #e0e0e0;
-    --icon-color: #a0a0a0;
-    --selected-background: #1e3a5f;
-    --selected-text-color: #64b5f6;
-    --scrollbar-color: #505050;
-    --scrollbar-hover-color: #606060;
-  }
 }
 `;
 }

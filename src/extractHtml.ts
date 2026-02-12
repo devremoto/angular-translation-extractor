@@ -23,9 +23,15 @@ export function extractFromHtmlContent(
   const found: FoundString[] = [];
   const attrsSet = new Set(attributeNames.map(a => a.toLowerCase()));
 
+  // Mask <style> and <script> content to avoid false positives in regexes
+  const maskedHtml = html.replace(/(<(style|script)\b[^>]*>)([\s\S]*?)(<\/\2>)/gi, (match, open, tag, content, closeTag) => {
+    // Replace content with spaces, but preserve newlines to keep line numbers accurate
+    return open + content.replace(/[^\n]/g, " ") + closeTag;
+  });
+
   const textRe = />((?:(?!<).)+)</gms;
   let m: RegExpExecArray | null;
-  while ((m = textRe.exec(html))) {
+  while ((m = textRe.exec(maskedHtml))) {
     const rawContent = m[1];
     const text = decodeEntities(rawContent).trim();
     if (!isProbablyUserFacing(text, minLen)) continue;
@@ -37,6 +43,7 @@ export function extractFromHtmlContent(
     // Calculate offset
     const startOffset = m.index + 1 + leadingWsLen;
 
+    // Use original HTML for location to be safe (though maskedHtml has same newlines)
     const { line, col } = locate(html, startOffset);
     const adjusted = adjustLocation(line, col, baseLine, baseCol);
     found.push({
@@ -51,7 +58,7 @@ export function extractFromHtmlContent(
   }
 
   const attrRe = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*("([^"]*)"|'([^']*)')/gms;
-  while ((m = attrRe.exec(html))) {
+  while ((m = attrRe.exec(maskedHtml))) {
     const attrName = (m[1] || "").toLowerCase();
     if (!attrsSet.has(attrName)) continue;
 
@@ -84,7 +91,7 @@ export function extractFromHtmlContent(
 
   // Extract strings from {{ }} interpolations (ternary and plain strings without | translate)
   const interpolationRe = /\{\{([^}]+)\}\}/gms;
-  while ((m = interpolationRe.exec(html))) {
+  while ((m = interpolationRe.exec(maskedHtml))) {
     const expr = m[1];
     const exprIndex = m.index + 2; // Account for {{
 
