@@ -29,27 +29,39 @@
     "commands": [
       {
         "command": "angularTranslation.extract",
-        "title": "Angular: Extract translations"
+        "title": "Extract translations (All app)",
+        "category": "Angular Translation"
       },
       {
         "command": "angularTranslation.extractFile",
-        "title": "Angular: Extract translations (File)"
+        "title": "Extract translations (File)",
+        "category": "Angular Translation"
       },
       {
         "command": "angularTranslation.extractSelection",
-        "title": "Angular: Extract translations (Selection)"
+        "title": "Extract translations (Selection)",
+        "category": "Angular Translation"
       },
       {
         "command": "angularTranslation.reverseFromFolder",
-        "title": "Angular: Reverse Translate (Folder)"
+        "title": "Reverse Translate (Folder)",
+        "category": "Angular Translation"
       },
       {
         "command": "angularTranslation.reverseFromFile",
-        "title": "Angular: Reverse Translate (File)"
+        "title": "Reverse Translate (File)",
+        "category": "Angular Translation"
       },
       {
         "command": "angularTranslation.reverseSelection",
-        "title": "Angular: Reverse Translate (Selection)"
+        "title": "Reverse Translate (Selection)",
+        "category": "Angular Translation"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "angularTranslation.menu",
+        "label": "Angular Translation Extractor"
       }
     ],
     "menus": {
@@ -69,60 +81,48 @@
       ],
       "explorer/context": [
         {
-          "command": "angularTranslation.extract",
-          "group": "navigation"
-        },
-        {
-          "command": "angularTranslation.extractFile",
+          "submenu": "angularTranslation.menu",
           "group": "navigation",
-          "when": "explorerResourceIsFolder == false && (resourceLangId == typescript || resourceLangId == html || resourceExtname == .ts || resourceExtname == .html)"
-        },
-        {
-          "command": "angularTranslation.reverseFromFolder",
-          "group": "navigation",
-          "when": "explorerResourceIsFolder"
-        },
-        {
-          "command": "angularTranslation.reverseFromFile",
-          "group": "navigation",
-          "when": "explorerResourceIsFolder == false"
+          "when": "explorerResourceIsFolder || resourceLangId == typescript || resourceLangId == html || resourceExtname == .ts || resourceExtname == .html"
         }
       ],
       "editor/context": [
         {
-          "command": "angularTranslation.extractFile",
+          "submenu": "angularTranslation.menu",
           "group": "navigation",
           "when": "resourceLangId == typescript || resourceLangId == html"
+        }
+      ],
+      "angularTranslation.menu": [
+        {
+          "command": "angularTranslation.extract",
+          "group": "1_extract",
+          "when": "!editorFocus || !editorHasSelection"
+        },
+        {
+          "command": "angularTranslation.extractFile",
+          "group": "1_extract",
+          "when": "!explorerResourceIsFolder && (!editorFocus || !editorHasSelection) && (resourceLangId == typescript || resourceLangId == html || resourceExtname == .ts || resourceExtname == .html)"
         },
         {
           "command": "angularTranslation.extractSelection",
-          "group": "navigation",
-          "when": "editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
+          "group": "1_extract",
+          "when": "editorFocus && editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
+        },
+        {
+          "command": "angularTranslation.reverseFromFolder",
+          "group": "2_reverse",
+          "when": "explorerResourceIsFolder"
         },
         {
           "command": "angularTranslation.reverseFromFile",
-          "group": "navigation",
-          "when": "!editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
+          "group": "2_reverse",
+          "when": "!explorerResourceIsFolder && (!editorFocus || !editorHasSelection) && (resourceLangId == typescript || resourceLangId == html || resourceExtname == .ts || resourceExtname == .html)"
         },
         {
           "command": "angularTranslation.reverseSelection",
-          "group": "navigation",
-          "when": "editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
-        }
-      ],
-      "editor/title": [
-        {
-          "command": "angularTranslation.extract",
-          "group": "navigation"
-        },
-        {
-          "command": "angularTranslation.reverseFromFile",
-          "group": "navigation"
-        },
-        {
-          "command": "angularTranslation.reverseSelection",
-          "group": "navigation",
-          "when": "editorHasSelection"
+          "group": "2_reverse",
+          "when": "editorFocus && editorHasSelection && (resourceLangId == typescript || resourceLangId == html)"
         }
       ]
     },

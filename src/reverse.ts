@@ -318,14 +318,65 @@ export async function findI18nMatches(
 /**
  * Clean up ngx-translate imports and inject declarations from TypeScript files
  */
-function cleanupTranslateImports(
+async function cleanupTranslateImports(
     content: string,
     filePath: string,
+    allMatches: ReversalMatch[],
     log?: (msg: string) => void
-): string {
+): Promise<string> {
     // Only clean up TypeScript files
     const isTsFile = /\.(ts|tsx)$/.test(filePath);
     if (!isTsFile) {
+        return content;
+    }
+
+    // Check for TranslatePipe usage in the current TS file content (inline templates)
+    const hasPipeInContent = /\|\s*translate\b/.test(content);
+
+    // Check for TranslatePipe usage in external HTML templates
+    let hasPipeInTemplate = false;
+    const templateUrlRegex = /templateUrl\s*:\s*['"]([^'"]+)['"]/g;
+    let templateMatch;
+
+    while ((templateMatch = templateUrlRegex.exec(content)) !== null) {
+        if (hasPipeInTemplate) break; // Already found usage, stop checking
+
+        try {
+            const templatePath = path.resolve(path.dirname(filePath), templateMatch[1]);
+            let templateContent = await fs.readFile(templatePath, 'utf8');
+
+            // Simulate replacements for the template file to check future state
+            const templateMatches = allMatches.filter(m => {
+                const p1 = path.normalize(m.fileAbs).toLowerCase();
+                const p2 = path.normalize(templatePath).toLowerCase();
+                return p1 === p2;
+            });
+
+            // Sort matches descending to apply correctly
+            const sortedMatches = [...templateMatches].sort((a, b) => {
+                return b.line !== a.line ? b.line - a.line : b.column - a.column;
+            });
+
+            for (const match of sortedMatches) {
+                if (templateContent.includes(match.text)) {
+                    templateContent = templateContent.replace(match.text, match.replacementText);
+                }
+            }
+
+            if (/\|\s*translate\b/.test(templateContent)) {
+                hasPipeInTemplate = true;
+            }
+        } catch (err) {
+            // If we can't read the template, assume it might use the pipe to be safe
+            if (log) log(`[cleanup] ⚠ Could not check external template: ${err}`);
+            hasPipeInTemplate = true;
+        }
+    }
+
+    // If pipe is used in TS (inline) or HTML (templateUrl), do not remove it
+    if (hasPipeInContent || hasPipeInTemplate) {
+        if (log && hasPipeInContent) log(`[cleanup] ℹ Skipping cleanup for ${path.basename(filePath)}: Pipe used in inline code/template`);
+        if (log && hasPipeInTemplate) log(`[cleanup] ℹ Skipping cleanup for ${path.basename(filePath)}: Pipe used in external template`);
         return content;
     }
 
@@ -348,6 +399,9 @@ function cleanupTranslateImports(
     // if (!content.includes('TranslatePipe.forRoot') && !content.includes('TranslatePipe.forChild')) {
     //     content = content.replace(/import\s+{[^}]*(?:TranslatePipe|TranslateService)[^}]*}\s+from\s+['"]@ngx-translate\/core['"];?\s*\n?/g, '');
     // }
+
+    // Remove empty imports if any
+    content = content.replace(/import\s*{\s*}\s*from\s*['"]@ngx-translate\/core['"];?\s*\n?/g, '');
 
     const removed = original !== content;
     if (log && removed) log(`[cleanup]   ✅ Cleaned up TranslateService imports and injections`);
@@ -391,6 +445,9 @@ export async function applyReverseTranslations(
         }
     }
 
+    // Track TS files that might need cleanup
+    const tsFilesToCleanup = new Set<string>();
+
     // Process each file
     for (const [filePath, fileMatches] of fileToMatches.entries()) {
         log(`[reverse] \n📄 ${path.basename(filePath)} (${fileMatches.length} replacements)`);
@@ -420,18 +477,52 @@ export async function applyReverseTranslations(
             }
 
             if (fileReplacements > 0) {
-                // Clean up unused TranslateService imports and injections
-                content = cleanupTranslateImports(content, filePath, log);
+                // If this is a TS file, mark for cleanup
+                if (filePath.endsWith('.ts')) {
+                    tsFilesToCleanup.add(filePath);
+                }
+                // If this is an HTML file, try to find associated TS file
+                if (filePath.endsWith('.html')) {
+                    const associatedTs = filePath.replace(/\.html$/, '.ts');
+                    tsFilesToCleanup.add(associatedTs);
+                }
 
                 // Write back
                 await fs.writeFile(filePath, content, "utf8");
                 log(`[reverse]   💾 Written to disk`);
             } else {
-                log(`[reverse]   ⚠️ No replacements applied to ${path.basename(filePath)}, skipping save and cleanup`);
+                log(`[reverse]   ⚠️ No replacements applied to ${path.basename(filePath)}, skipping save`);
             }
         } catch (error) {
             log(`[reverse]   ❌ ERROR: ${error}`);
             errors.push(`Error processing ${path.basename(filePath)}: ${error}`);
+        }
+    }
+
+    // Perform cleanup on candidate TS files
+    if (tsFilesToCleanup.size > 0) {
+        log(`[reverse] \n🧹 Running cleanup on ${tsFilesToCleanup.size} potential TS files...`);
+        for (const filePath of tsFilesToCleanup) {
+            try {
+                // Check if file exists first
+                try {
+                    await fs.access(filePath);
+                } catch {
+                    continue; // File doesn't exist (e.g. HTML has no sibling TS)
+                }
+
+                let content = await fs.readFile(filePath, "utf8");
+                const original = content;
+
+                content = await cleanupTranslateImports(content, filePath, matches, log);
+
+                if (content !== original) {
+                    await fs.writeFile(filePath, content, "utf8");
+                    log(`[reverse]   💾 Cleaned and saved ${path.basename(filePath)}`);
+                }
+            } catch (error) {
+                log(`[reverse]   ⚠ Cleanup failed for ${path.basename(filePath)}: ${error}`);
+            }
         }
     }
 

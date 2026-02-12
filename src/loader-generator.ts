@@ -600,6 +600,7 @@ export class TgLanguageSelectorComponent implements OnInit {
 
           var defaultLang = this.languages.find(l => l.default) || this.languages[0];
           if (defaultLang) {
+            this.translateService.setFallbackLang(defaultLang.code);
             this.translateService.use(defaultLang.code);
           }
           
@@ -621,10 +622,14 @@ export class TgLanguageSelectorComponent implements OnInit {
       });
   }
 
-  getLanguagesFromSession() {
+   getLanguagesFromSession() {
     const savedLangCode = sessionStorage.getItem('selectedLanguage');
     const savedLanguages = sessionStorage.getItem('languages');
     if (savedLanguages) {
+      var defaultLang = JSON.parse(savedLanguages).find((l: TgLanguage) => l.default) || JSON.parse(savedLanguages)[0];
+      if (defaultLang) {
+        this.translateService.setFallbackLang(defaultLang.code);
+      }
       this.languages = JSON.parse(savedLanguages) as TgLanguage[];
       const savedLang = this.languages.find(l => l.code === savedLangCode);
       if (savedLang) {

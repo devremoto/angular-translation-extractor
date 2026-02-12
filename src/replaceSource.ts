@@ -225,7 +225,7 @@ export async function addTranslateModuleImport(tsFile: string, addToComponentImp
     let modified = false;
 
     // Check if TranslatePipe import from @ngx-translate/core already exists
-    const hasTranslateModuleImport = /import\s*\{[^}]*\bTranslateModule\b[^}]*\}\s*from\s*['"]@ngx-translate\/core['"]/.
+    const hasTranslateModuleImport = /import\s*\{[^}]*\bTranslatePipe\b[^}]*\}\s*from\s*['"]@ngx-translate\/core['"]/.
         test(content);
 
     // Add import statement if not present
@@ -255,7 +255,7 @@ export async function addTranslateModuleImport(tsFile: string, addToComponentImp
                     const importsArrayContent = importsArrayRange
                         ? componentMetadata.slice(importsArrayRange.start, importsArrayRange.end)
                         : componentMetadata.slice(importsMatch.index ?? 0);
-                    const hasTranslateModuleInArray = /\bTranslateModule\b/.test(importsArrayContent);
+                    const hasTranslateModuleInArray = /\bTranslatePipe\b/.test(importsArrayContent);
 
                     if (!hasTranslateModuleInArray) {
                         // Add TranslatePipe to existing imports array
