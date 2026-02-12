@@ -72,11 +72,6 @@ export function getNestedValue(obj: any, path: string): string | undefined {
   return typeof current === "string" ? current : undefined;
 }
 
-function getMainLanguageCode(code: string): string {
-  const parts = code.split("-");
-  return parts[0].toLowerCase();
-}
-
 export async function generatePerFileLocales(opts: {
   workspaceRoot: string;
   srcDir: string;
@@ -121,7 +116,7 @@ async function generateAsSingleFilePerLanguage(opts: {
 
   // Collect all strings
   let allLocales = languages.map(l => l.code);
-  const mainBaseLocaleCode =  baseLocaleCode;
+  const mainBaseLocaleCode = baseLocaleCode;
   allLocales = Array.from(new Set(allLocales));
   const targetLocales = allLocales.filter(c => c !== mainBaseLocaleCode);
 
@@ -185,8 +180,10 @@ async function generateAsSingleFilePerLanguage(opts: {
     }
 
     // Map text to key for this file
-    const key = valToKey.get(foundString.text)!;
-    keyMapByFile[fileAbs][foundString.text] = key;
+    const key = valToKey.get(foundString.text);
+    if (key) {
+      keyMapByFile[fileAbs][foundString.text] = key;
+    }
   }
 
   // Write base language file

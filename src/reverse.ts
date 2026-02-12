@@ -16,15 +16,6 @@ export type ReversalMatch = {
 };
 
 /**
- * Get main language code from full locale code
- * e.g., "en-US" -> "en", "pt-BR" -> "pt"
- */
-function getMainLanguageCode(code: string): string {
-    const parts = code.split("-");
-    return parts[0].toLowerCase();
-}
-
-/**
  * Load all translation entries from JSON files
  * Maps key -> value from the base locale JSON files
  */

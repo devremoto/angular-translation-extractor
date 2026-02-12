@@ -13,14 +13,14 @@ export async function generateLoaderArtifacts(opts: {
   updateMode: "merge" | "overwrite" | "recreate";
   languagesJsonPath?: string;
 }): Promise<{ loaderPath: string; readmePath: string; languageSelectorPath: string; packageJsonUpdated: boolean; packageJsonReason?: string }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, languagesJsonPath } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles: _baseFiles, updateMode, languagesJsonPath } = opts;
 
 
 
   const translateDirAbs = path.join(workspaceRoot, srcDir, "translate");
   await ensureDir(translateDirAbs);
 
-  const outputRootAbs = path.join(workspaceRoot, outputRoot);
+  const _outputRootAbs = path.join(workspaceRoot, outputRoot);
 
   // Convert outputRoot to relative path for use in loader (e.g., "src/assets/I18n" -> "./assets/I18n/")
   const outputRootRelative = `./${outputRoot.replace(/^src\//, "")}/`.replace(/\/\/+/g, "/");

@@ -55,6 +55,65 @@ export function extractFromJsTsContent(
   const callRegexList = compileRegexList(aggressiveModeAllowCallRegex);
   const contextRegexList = compileRegexList(aggressiveModeAllowContextRegex);
 
+  type LiteralKind = "js-string" | "js-template";
+
+  function buildRestrictedItem(
+    pathNode: any,
+    text: string,
+    kind: LiteralKind,
+    reason: string,
+    fnArgContext: FunctionArgContext
+  ): RestrictedString {
+    return {
+      fileAbs,
+      fileRelFromSrc,
+      line: pathNode.loc?.start?.line ?? 1,
+      column: pathNode.loc?.start?.column ?? 0,
+      text,
+      kind,
+      reason,
+      context: fnArgContext.context
+    };
+  }
+
+  function shouldExtractByContext(path: any, text: string, fnArgAllowed: boolean): boolean {
+    return inMessageContext(path) || isHighConfidenceString(text) || fnArgAllowed;
+  }
+
+  function processLiteralCandidate(
+    path: any,
+    text: string,
+    kind: LiteralKind,
+    shouldSkipComplexTemplates: boolean
+  ) {
+    if (processedTemplateNodes.has(path.node)) return;
+    if (shouldSkipComplexTemplates && path.node.expressions.length > 0) return;
+    if (inIgnoredContext(path)) return;
+    if (inControlFlowCondition(path)) return;
+
+    const fnArgContext = getFunctionArgumentContext(path, code);
+    const aggressiveDecision = evaluateAggressiveModeForFunctionArg(
+      text,
+      aggressiveMode,
+      !!fnArgContext,
+      fnArgContext,
+      callRegexList,
+      contextRegexList
+    );
+    const ignoreMinLen = aggressiveMode === "high" && !!fnArgContext;
+    if (!isProbablyUserFacing(text, ignoreMinLen ? 0 : minLen)) return;
+
+    if (fnArgContext && !aggressiveDecision.allowed) {
+      onRestricted?.(buildRestrictedItem(path.node, text, kind, aggressiveDecision.reason, fnArgContext));
+      return;
+    }
+
+    const fnArgAllowed = !!fnArgContext && aggressiveDecision.allowed;
+    if (shouldExtractByContext(path, text, fnArgAllowed)) {
+      add(kind, text, path.node.loc, ignoreMinLen);
+    }
+  }
+
   function add(kind: FoundString["kind"], text: string, loc: any, ignoreMinLen = false) {
     if (!isProbablyUserFacing(text, ignoreMinLen ? 0 : minLen)) return;
     if ((kind === "js-string" || kind === "js-template") && looksLikeModuleSpecifier(text)) return;
@@ -137,8 +196,6 @@ export function extractFromJsTsContent(
       if (callee.type === "MemberExpression" && callee.property.type === "Identifier" &&
         ["instant", "get", "stream"].includes(callee.property.name)) {
 
-        let matchesService = false;
-
         // Helper to check expression
         const checkObj = (obj: any): boolean => {
           if (obj.type === "MemberExpression" && obj.property.type === "Identifier") {
@@ -174,78 +231,12 @@ export function extractFromJsTsContent(
 
     // Extract strings from Class code
     StringLiteral(path: any) {
-      if (processedTemplateNodes.has(path.node)) return;
-      if (inIgnoredContext(path)) return;
-      if (inControlFlowCondition(path)) return;
-
-      const text = path.node.value;
-      const fnArgContext = getFunctionArgumentContext(path, code);
-      const aggressiveDecision = evaluateAggressiveModeForFunctionArg(
-        text,
-        aggressiveMode,
-        !!fnArgContext,
-        fnArgContext,
-        callRegexList,
-        contextRegexList
-      );
-      const ignoreMinLen = aggressiveMode === "high" && !!fnArgContext;
-      if (!isProbablyUserFacing(text, ignoreMinLen ? 0 : minLen)) return;
-
-      if (fnArgContext && !aggressiveDecision.allowed) {
-        onRestricted?.({
-          fileAbs,
-          fileRelFromSrc,
-          line: path.node.loc?.start?.line ?? 1,
-          column: path.node.loc?.start?.column ?? 0,
-          text,
-          kind: "js-string",
-          reason: aggressiveDecision.reason,
-          context: fnArgContext.context
-        });
-        return;
-      }
-
-      if (inMessageContext(path) || isHighConfidenceString(text) || (fnArgContext && aggressiveDecision.allowed)) {
-        add("js-string", text, path.node.loc, ignoreMinLen);
-      }
+      processLiteralCandidate(path, path.node.value, "js-string", false);
     },
 
     TemplateLiteral(path: any) {
-      if (processedTemplateNodes.has(path.node)) return;
-      if (path.node.expressions.length > 0) return; // Skip complex template literals for now
-      if (inIgnoredContext(path)) return;
-      if (inControlFlowCondition(path)) return;
-
       const text = path.node.quasis.map((q: any) => q.value.cooked).join("");
-      const fnArgContext = getFunctionArgumentContext(path, code);
-      const aggressiveDecision = evaluateAggressiveModeForFunctionArg(
-        text,
-        aggressiveMode,
-        !!fnArgContext,
-        fnArgContext,
-        callRegexList,
-        contextRegexList
-      );
-      const ignoreMinLen = aggressiveMode === "high" && !!fnArgContext;
-      if (!isProbablyUserFacing(text, ignoreMinLen ? 0 : minLen)) return;
-
-      if (fnArgContext && !aggressiveDecision.allowed) {
-        onRestricted?.({
-          fileAbs,
-          fileRelFromSrc,
-          line: path.node.loc?.start?.line ?? 1,
-          column: path.node.loc?.start?.column ?? 0,
-          text,
-          kind: "js-template",
-          reason: aggressiveDecision.reason,
-          context: fnArgContext.context
-        });
-        return;
-      }
-
-      if (inMessageContext(path) || isHighConfidenceString(text) || (fnArgContext && aggressiveDecision.allowed)) {
-        add("js-template", text, path.node.loc, ignoreMinLen);
-      }
+      processLiteralCandidate(path, text, "js-template", true);
     }
   });
 
