@@ -93,7 +93,7 @@ export async function replaceExtractedStrings(opts: {
         }
     }
 
-    // Add TranslateModule import to TS files with corresponding HTML templates
+    // Add TranslatePipe import to TS files with corresponding HTML templates
     let tsFilesUpdated = 0;
     for (const htmlFile of htmlFilesModified) {
         const tsFile = htmlFile.replace(/\.html$/, ".ts");
@@ -107,7 +107,7 @@ export async function replaceExtractedStrings(opts: {
         }
     }
 
-    // Add TranslateModule to inline template TS files
+    // Add TranslatePipe to inline template TS files
     for (const tsFile of tsFilesModified) {
         const shouldAddToComponent = bootstrapStyle === "standalone";
         const updated = await addTranslateModuleImport(tsFile, shouldAddToComponent);
@@ -224,14 +224,14 @@ export async function addTranslateModuleImport(tsFile: string, addToComponentImp
     let content = await fs.readFile(tsFile, "utf8");
     let modified = false;
 
-    // Check if TranslateModule import from @ngx-translate/core already exists
+    // Check if TranslatePipe import from @ngx-translate/core already exists
     const hasTranslateModuleImport = /import\s*\{[^}]*\bTranslateModule\b[^}]*\}\s*from\s*['"]@ngx-translate\/core['"]/.
         test(content);
 
     // Add import statement if not present
     if (!hasTranslateModuleImport) {
         const lastImportIndex = findLastImportIndex(content);
-        const importLine = "import { TranslateModule } from '@ngx-translate/core';\n";
+        const importLine = "import { TranslatePipe } from '@ngx-translate/core';\n";
         if (lastImportIndex >= 0) {
             content = content.slice(0, lastImportIndex) + importLine + content.slice(lastImportIndex);
         } else {
@@ -250,7 +250,7 @@ export async function addTranslateModuleImport(tsFile: string, addToComponentImp
             if (componentMetadata) {
                 const importsMatch = componentMetadata.match(/imports\s*:\s*\[/);
                 if (importsMatch) {
-                    // Check if TranslateModule is already in the imports array
+                    // Check if TranslatePipe is already in the imports array
                     const importsArrayRange = findImportsArrayRange(componentMetadata, importsMatch.index ?? 0);
                     const importsArrayContent = importsArrayRange
                         ? componentMetadata.slice(importsArrayRange.start, importsArrayRange.end)
@@ -258,9 +258,9 @@ export async function addTranslateModuleImport(tsFile: string, addToComponentImp
                     const hasTranslateModuleInArray = /\bTranslateModule\b/.test(importsArrayContent);
 
                     if (!hasTranslateModuleInArray) {
-                        // Add TranslateModule to existing imports array
+                        // Add TranslatePipe to existing imports array
                         const importsStartIdx = startIdx + (importsMatch.index ?? 0) + importsMatch[0].length;
-                        const insertText = "TranslateModule, ";
+                        const insertText = "TranslatePipe, ";
                         content = content.slice(0, importsStartIdx) + insertText + content.slice(importsStartIdx);
                         modified = true;
                     }
@@ -270,7 +270,7 @@ export async function addTranslateModuleImport(tsFile: string, addToComponentImp
                     if (selectorMatch) {
                         const selectorEndIdx = startIdx + (selectorMatch.index ?? 0) + selectorMatch[0].length;
                         const hasComma = content[selectorEndIdx - 1] === ",";
-                        const insertText = hasComma ? "\n  imports: [TranslateModule]," : ",\n  imports: [TranslateModule]";
+                        const insertText = hasComma ? "\n  imports: [TranslatePipe]," : ",\n  imports: [TranslatePipe]";
                         content = content.slice(0, selectorEndIdx) + insertText + content.slice(selectorEndIdx);
                         modified = true;
                     }

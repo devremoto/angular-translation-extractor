@@ -333,20 +333,20 @@ function cleanupTranslateImports(
 
     const original = content;
 
-    // Remove TranslateModule usage in imports array
-    // Case: imports: [TranslateModule, ...] -> matches "TranslateModule,"
-    content = content.replace(/TranslateModule(?!\.)\s*,\s*/g, '');
-    // Case: imports: [..., TranslateModule] -> matches ", TranslateModule"
-    content = content.replace(/,\s*TranslateModule(?!\.)/g, '');
-    // Case: imports: [TranslateModule] -> matches "TranslateModule"
-    // Use word boundary and negative lookahead to avoid breaking TranslateModule.forRoot
-    content = content.replace(/\bTranslateModule\b(?!\.)/g, '');
+    // Remove TranslatePipe usage in imports array
+    // Case: imports: [TranslatePipe, ...] -> matches "TranslatePipe,"
+    content = content.replace(/TranslatePipe(?!\.)\s*,\s*/g, '');
+    // Case: imports: [..., TranslatePipe] -> matches ", TranslatePipe"
+    content = content.replace(/,\s*TranslatePipe(?!\.)/g, '');
+    // Case: imports: [TranslatePipe] -> matches "TranslatePipe"
+    // Use word boundary and negative lookahead to avoid breaking TranslatePipe.forRoot
+    content = content.replace(/\bTranslatePipe\b(?!\.)/g, '');
 
-    // // Remove import lines containing TranslateModule or TranslateService from @ngx-translate/core
+    // // Remove import lines containing TranslatePipe or TranslateService from @ngx-translate/core
     // // Matches entire import statement on one or multiple lines
     // // Guard against removing import if forRoot/forChild is used
-    // if (!content.includes('TranslateModule.forRoot') && !content.includes('TranslateModule.forChild')) {
-    //     content = content.replace(/import\s+{[^}]*(?:TranslateModule|TranslateService)[^}]*}\s+from\s+['"]@ngx-translate\/core['"];?\s*\n?/g, '');
+    // if (!content.includes('TranslatePipe.forRoot') && !content.includes('TranslatePipe.forChild')) {
+    //     content = content.replace(/import\s+{[^}]*(?:TranslatePipe|TranslateService)[^}]*}\s+from\s+['"]@ngx-translate\/core['"];?\s*\n?/g, '');
     // }
 
     const removed = original !== content;

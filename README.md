@@ -152,12 +152,12 @@ Import the standalone component and use it in your templates. It supports both l
 
 ```typescript
 import { Component } from '@angular/core';
-import { LanguageSelectorComponent } from './translate/tg-language-selector.component';
+import { TgLanguageSelectorComponent } from './translate/tg-language-selector.component';
 
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [LanguageSelectorComponent],
+  imports: [TgLanguageSelectorComponent],
   template: `
     <nav>
       <!-- Default Light Mode -->
@@ -243,7 +243,6 @@ You can configure the extension through VS Code settings (`settings.json`) or th
 | `i18nExtractor.autoTranslateDefaultLanguage` | Translate source language (usually false) | `false` |
 | `i18nExtractor.translationService` | Service: `google` or `libretranslate` | `google` |
 | `i18nExtractor.googleTranslateDelay` | Delay between translation API calls (ms) | `500` |
-| `i18nExtractor.enableTransalationCache` | Enable sessionStorage caching | `false` |
 | `i18nExtractor.useTranslateCommand` | Run custom command after extration | `false` |
 | `i18nExtractor.translateCommand` | Custom translation command | `npx-translate` |
 | `i18nExtractor.translateArgsTemplate` | Arguments for custom command | `["--input", "{baseFile}", "--outDir", "{outDir}", "--from", "{baseLocale}", "--to", "{targetLocale}"]` |
@@ -424,12 +423,12 @@ The component is generated as a standalone component with the selector `tg-langu
 ```typescript
 // In your app component or any standalone component
 import { Component } from '@angular/core';
-import { LanguageSelectorComponent } from './translate/tg-language-selector.component';
+import { TgLanguageSelectorComponent } from './translate/tg-language-selector.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [LanguageSelectorComponent],
+  imports: [TgLanguageSelectorComponent],
   template: `
     <header>
       <h1>My App</h1>
@@ -500,7 +499,6 @@ Access settings via: **File → Preferences → Settings** (or `Ctrl+,`) → Sea
 | `i18nExtractor.mainTsPath` | `"{srcDir}/main.ts"` | Path to Angular main.ts (supports `{srcDir}` placeholder) |
 | `i18nExtractor.angularBootstrapStyle` | `"standalone"` | How to wire TranslateModule in main.ts (`standalone` or `module`) |
 | `i18nExtractor.updateMainTs` | `true` | If true, update main.ts to wire the translation loader |
-| `i18nExtractor.enableTransalationCache` | `false` | Enable/disable sessionStorage caching in the generated loader. Also updates environment files. |
 
 ### Language Generation Settings
 

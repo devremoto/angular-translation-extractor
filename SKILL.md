@@ -76,7 +76,6 @@ Controlled by `updateMode` setting:
   "i18nExtractor.srcDir": "src",
   "i18nExtractor.outputRoot": "src/assets/i18n",
   "i18nExtractor.updateMode": "merge",  // merge | overwrite | recreate
-  "i18nExtractor.enableTransalationCache": false // Enable sessionStorage caching in loader
 }
 ```
 

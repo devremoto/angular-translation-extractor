@@ -170,6 +170,15 @@ async function generateAsSingleFilePerLanguage(opts: {
       keyMapByFile[fileAbs] = {};
     }
 
+    // Handle existing keys
+    if (foundString.isAlreadyTranslated) {
+      if (!getNestedValue(base, foundString.text)) {
+        setNestedValue(base, foundString.text, "");
+        stringsAdded++;
+      }
+      continue;
+    }
+
     // Add string if not already mapped
     if (!valToKey.has(foundString.text)) {
       const key = makeKey(foundString.text, usedKeys, prefix);
@@ -297,6 +306,13 @@ async function generateAsPerFileLocales(opts: {
       .join(".");
 
     for (const s of strings) {
+      if (s.isAlreadyTranslated) {
+        if (!getNestedValue(base, s.text)) {
+          setNestedValue(base, s.text, "");
+          stringsAdded++;
+        }
+        continue;
+      }
       if (valToKey.has(s.text)) continue;
       const key = makeKey(s.text, usedKeys, prefix);
       setNestedValue(base, key, s.text);

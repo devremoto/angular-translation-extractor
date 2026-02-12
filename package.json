@@ -286,11 +286,6 @@
           "type": "boolean",
           "default": true,
           "description": "If true, generate a single file per language in the i18n root directory instead of per-file translations. All strings are consolidated with file-path-based keys."
-        },
-        "i18nExtractor.enableTransalationCache": {
-          "type": "boolean",
-          "default": false,
-          "description": "If true, enable sessionStorage caching for translations."
         }
       }
     }

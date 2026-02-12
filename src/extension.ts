@@ -16,7 +16,6 @@ import { generatePerFileLocales } from "./generate";
 import { generateLoaderArtifacts } from "./loader-generator";
 import { replaceExtractedStrings, ensureComponentStructure, addTranslateModuleImport } from "./replaceSource";
 import { updateMainTs } from "./updateMainTs";
-import { updateEnvironment } from "./updateEnvironment";
 import { runTranslateCommand } from "./translate";
 import { updateAngularJson } from "./updateAngularJson";
 import { captureConsoleLogs } from "./console-capture";
@@ -255,16 +254,7 @@ async function performAppConfiguration(
     output.appendLine(`[angular-i18n] ⚠ Could not verify main.ts: ${(err as Record<string, unknown>)?.message || String(err)}`);
   }
 
-  // 3. Environment files
-  try {
-    await updateEnvironment({
-      workspaceRoot: root,
-      srcDir: cfg.srcDir,
-      enableTransalationCache: cfg.enableTransalationCache
-    });
-  } catch (err) {
-    output.appendLine(`[angular-i18n] ⚠ Could not update environment: ${err}`);
-  }
+
 }
 
 interface ProcessOptions {
@@ -274,6 +264,7 @@ interface ProcessOptions {
 }
 
 async function processLocalesAndArtifacts(
+  context: vscode.ExtensionContext,
   root: string,
   cfg: ExtConfig,
   found: FoundString[],
@@ -282,6 +273,38 @@ async function processLocalesAndArtifacts(
 ) {
   output.appendLine(`[angular-i18n] Reading locales list: ${cfg.languagesJsonPath}`);
   const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
+
+  // Check for language changes
+  const storedLangs = context.workspaceState.get<LanguageEntry[]>("angular-i18n-languages", []);
+  const oldCodes = new Set(storedLangs.map(l => l.code));
+  const newCodes = new Set(langs.map(l => l.code));
+
+  let hasChanges = false;
+  if (oldCodes.size !== newCodes.size) {
+    hasChanges = true;
+  } else {
+    for (const c of oldCodes) {
+      if (!newCodes.has(c)) {
+        hasChanges = true;
+        break;
+      }
+    }
+    // Also check active/default status if needed, but code set covers add/remove
+  }
+
+  if (hasChanges) {
+    output.appendLine(`[angular-i18n] 🔄 Language configuration change detected.`);
+    const added = langs.filter(l => !oldCodes.has(l.code)).map(l => l.code);
+    const removed = storedLangs.filter(l => !newCodes.has(l.code)).map(l => l.code);
+
+    if (added.length) output.appendLine(`  + Added: ${added.join(", ")}`);
+    if (removed.length) output.appendLine(`  - Removed: ${removed.join(", ")}`);
+
+    // Update stored state
+    await context.workspaceState.update("angular-i18n-languages", langs);
+  } else {
+    output.appendLine(`[angular-i18n] Language configuration unchanged.`);
+  }
 
   const defaultLang = normalizeLanguages(langs).find(l => l.default === true)?.code;
   const baseLocaleCode = defaultLang ?? cfg.baseLocaleCode;
@@ -327,7 +350,6 @@ async function processLocalesAndArtifacts(
       updateMode: options.forceUpdateMode ?? cfg.updateMode,
       onlyMainLanguages: cfg.onlyMainLanguages,
       singleFilePerLanguage: cfg.singleFilePerLanguage,
-      enableTransalationCache: cfg.enableTransalationCache,
       languagesJsonPath: cfg.languagesJsonPath
     });
 
@@ -350,6 +372,7 @@ async function processLocalesAndArtifacts(
 }
 
 async function runExtractionPipeline(
+  context: vscode.ExtensionContext,
   folder: vscode.WorkspaceFolder,
   action: (root: string, cfg: ExtConfig, output: vscode.OutputChannel) => Promise<FoundString[]>,
   options: ProcessOptions = {}
@@ -367,12 +390,11 @@ async function runExtractionPipeline(
     }
 
     const found = await action(root, cfg, output);
-    if (!found || found.length === 0) {
-      // Action itself might have logged "No strings found" or we do it here
+    if (!found) { // allow empty found list to proceed for sync purposes
       return null;
     }
 
-    const { gen, generatedLangs, baseLocaleCode } = await processLocalesAndArtifacts(root, cfg, found, output, options);
+    const { gen, generatedLangs, baseLocaleCode } = await processLocalesAndArtifacts(context, root, cfg, found, output, options);
 
     await executeAutoTranslate(cfg, root, baseLocaleCode, generatedLangs, gen.baseFiles, output);
     await runNgBuild(root, output);
@@ -501,7 +523,7 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    await runExtractionPipeline(folders[0], async (root, cfg, output) => {
+    await runExtractionPipeline(context, folders[0], async (root, cfg, output) => {
       output.appendLine(`[angular-i18n] Scanning ${cfg.srcDir}/ (js/ts/html)...`);
       const found = await scanForStrings({ workspaceRoot: root, cfg });
       output.appendLine(`[angular-i18n] Found ${found.length} candidate strings.`);
@@ -516,7 +538,7 @@ export function activate(context: vscode.ExtensionContext) {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) return;
 
-    await runExtractionPipeline(folders[0], async (root, cfg, output) => {
+    await runExtractionPipeline(context, folders[0], async (root, cfg, output) => {
       const fileAbs = uri.fsPath;
       const srcAbs = path.join(root, cfg.srcDir);
       const relFromSrc = posixRel(srcAbs, fileAbs);
@@ -640,7 +662,7 @@ export function activate(context: vscode.ExtensionContext) {
       rawText: rawText
     };
 
-    const result = await runExtractionPipeline(folders[0], async () => [found], {
+    const result = await runExtractionPipeline(context, folders[0], async () => [found], {
       skipReplacement: true,
       forceUpdateMode: "merge"
     });

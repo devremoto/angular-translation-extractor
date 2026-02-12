@@ -22,7 +22,6 @@ export type ExtConfig = {
   translationService: "google" | "libretranslate";
   googleTranslateDelay: number;
   singleFilePerLanguage: boolean;
-  enableTransalationCache: boolean;
 };
 
 export function getConfig(): ExtConfig {
@@ -71,6 +70,5 @@ export function getConfig(): ExtConfig {
     translationService: cfg.get<"google" | "libretranslate">("translationService", "google"),
     googleTranslateDelay: cfg.get<number>("googleTranslateDelay", 500),
     singleFilePerLanguage: cfg.get<boolean>("singleFilePerLanguage", true),
-    enableTransalationCache: cfg.get<boolean>("enableTransalationCache", false),
   };
 }

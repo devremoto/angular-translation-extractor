@@ -15,5 +15,7 @@ export type FoundString = {
   column: number;
   text: string;
   rawText?: string; // The exact raw text in the file (including whitespace if relevant for replacement matching)
+  isAlreadyTranslated?: boolean;
   kind: "js-string" | "js-template" | "html-text" | "html-attr" | "html-interpolation";
 };
+

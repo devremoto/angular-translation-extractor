@@ -2,7 +2,6 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { LanguageEntry } from "./types";
 import { ensureDir } from "./utils";
-import { updateEnvironment } from "./updateEnvironment";
 
 export async function generateLoaderArtifacts(opts: {
   workspaceRoot: string;
@@ -14,13 +13,11 @@ export async function generateLoaderArtifacts(opts: {
   updateMode: "merge" | "overwrite" | "recreate";
   onlyMainLanguages?: boolean;
   singleFilePerLanguage?: boolean;
-  enableTransalationCache?: boolean;
   languagesJsonPath?: string;
 }): Promise<{ loaderPath: string; readmePath: string; languageSelectorPath: string; packageJsonUpdated: boolean; packageJsonReason?: string }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, onlyMainLanguages, singleFilePerLanguage: _singleFilePerLanguage, enableTransalationCache = false, languagesJsonPath } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, baseFiles, updateMode, onlyMainLanguages, singleFilePerLanguage: _singleFilePerLanguage, languagesJsonPath } = opts;
 
-  // Ensure environment is updated to support enabling cache
-  await updateEnvironment({ workspaceRoot, srcDir, enableTransalationCache });
+
 
   const translateDirAbs = path.join(workspaceRoot, srcDir, "translate");
   await ensureDir(translateDirAbs);
@@ -37,7 +34,6 @@ export async function generateLoaderArtifacts(opts: {
 import { TranslateLoader } from "@ngx-translate/core";
 import { Observable, of } from "rxjs";
 import { map, catchError, tap } from "rxjs/operators";
-import { environment } from "../environments/environment";
 
 export type TgTranslations = Record<string, any>;
 
@@ -45,8 +41,7 @@ export class TgTranslationLoader implements TranslateLoader {
   constructor(
     private http: HttpClient,
     private prefix: string = "${outputRootRelative}",
-    private suffix: string = ".json",
-    private cacheEnabled: boolean = typeof (environment as any).enableTransalationCache !== "undefined" ? (environment as any).enableTransalationCache : ${enableTransalationCache}
+    private suffix: string = ".json"    
   ) {}
 
   public getTranslation(lang: string): Observable<TgTranslations> { 
@@ -146,7 +141,6 @@ Key settings:
 - \`i18nExtractor.autoTranslateDefaultLanguage\` - Translate the default language (default: \`false\`)
 - \`i18nExtractor.translationService\` - Choose \`"google"\` (default, recommended) or \`"libretranslate"\`
 - \`i18nExtractor.googleTranslateDelay\` - Delay between requests in milliseconds (default: \`500\`, minimum: \`100\`)
-- \`i18nExtractor.enableTransalationCache\` - Enable/disable \`sessionStorage\` caching. Controls \`environment.enableTransalationCache\` (default: \`false\`)
 
 ## Configuration Settings
 
@@ -172,7 +166,6 @@ You can configure the extension through VS Code settings (\`settings.json\`) or 
 | \`i18nExtractor.autoTranslateDefaultLanguage\` | Translate source language (usually false) | \`false\` |
 | \`i18nExtractor.translationService\` | Service: \`google\` or \`libretranslate\` | \`google\` |
 | \`i18nExtractor.googleTranslateDelay\` | Delay between translation API calls (ms) | \`500\` |
-| \`i18nExtractor.enableTransalationCache\` | Enable sessionStorage caching | \`false\` |
 | \`i18nExtractor.useTranslateCommand\` | Run custom command after extration | \`false\` |
 | \`i18nExtractor.translateCommand\` | Custom translation command | \`npx-translate\` |
 | \`i18nExtractor.translateArgsTemplate\` | Arguments for custom command | \`["--input", "{baseFile}", "--outDir", "{outDir}", "--from", "{baseLocale}", "--to", "{targetLocale}"]\` |
@@ -413,12 +406,12 @@ Import the standalone component and use it in your templates. You can configure 
 
 \`\`\`typescript
 import { Component } from '@angular/core';
-import { LanguageSelectorComponent } from './translate/tg-language-selector.component';
+import { TgLanguageSelectorComponent } from './translate/tg-language-selector.component';
 
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [LanguageSelectorComponent],
+  imports: [TgLanguageSelectorComponent],
   template: \`
     <nav>
       <h1>My App</h1>
@@ -519,7 +512,7 @@ Run the command: **Angular Translation Extractor: Extract Strings** from the VS 
     }
   }
 
-  const selectorComponent = getLanguageSelectorComponent(languagesJsonUrl);
+  const selectorComponent = getTgLanguageSelectorComponent(languagesJsonUrl);
   const selectorTemplate = getLanguageSelectorTemplate();
   const selectorStyle = getLanguageSelectorStyle();
 
@@ -537,11 +530,6 @@ Run the command: **Angular Translation Extractor: Extract Strings** from the VS 
   };
 }
 
-function getMainLanguageCode(code: string): string {
-  const parts = code.split("-");
-  return parts[0].toLowerCase();
-}
-
 async function shouldWriteFile(fileAbs: string, allowOverwrite: boolean): Promise<boolean> {
   if (allowOverwrite) return true;
   try {
@@ -552,7 +540,7 @@ async function shouldWriteFile(fileAbs: string, allowOverwrite: boolean): Promis
   }
 }
 
-function getLanguageSelectorComponent(languagesJsonUrl: string): string {
+function getTgLanguageSelectorComponent(languagesJsonUrl: string): string {
   return `/* 
  * This file is auto-generated by the Angular Translation Extractor extension.
  * Any manual changes to this file may be lost when the extension runs again.
@@ -562,7 +550,7 @@ import { CommonModule } from '@angular/common';
 import { TranslateService } from '@ngx-translate/core';
 import { HttpClient } from '@angular/common/http';
 
-export interface Language {
+export interface TgLanguage {
   code: string;
   englishName?: string;
   nativeName?: string;
@@ -583,10 +571,10 @@ export interface Language {
     '[class.dark-mode]': 'mode() === "dark"'
   }
 })
-export class LanguageSelectorComponent implements OnInit {
+export class TgLanguageSelectorComponent implements OnInit {
   mode = input<'white' | 'dark'>('white');
-  languages: Language[] = [];
-  currentLanguage: Language | null = null;
+  languages: TgLanguage[] = [];
+  currentLanguage: TgLanguage | null = null;
   isOpen = false;
 
   constructor(
@@ -604,7 +592,7 @@ export class LanguageSelectorComponent implements OnInit {
 
   private loadLanguages(): void {
 
-    this.http.get<Language[]>('${languagesJsonUrl}')
+    this.http.get<TgLanguage[]>('${languagesJsonUrl}')
       .subscribe({
         next: (langs) => {
           this.languages = langs.filter(l => l.active !== false);
@@ -634,22 +622,21 @@ export class LanguageSelectorComponent implements OnInit {
   }
 
   getLanguagesFromSession() {
-    const savedLanguages = sessionStorage.getItem('languages');
     const savedLangCode = sessionStorage.getItem('selectedLanguage');
-
+    const savedLanguages = sessionStorage.getItem('languages');
     if (savedLanguages) {
-      this.languages = JSON.parse(savedLanguages) as Language[];
+      this.languages = JSON.parse(savedLanguages) as TgLanguage[];
       const savedLang = this.languages.find(l => l.code === savedLangCode);
       if (savedLang) {
         this.currentLanguage = savedLang;
         this.translateService.use(savedLang.code);
-        return this.currentLanguage;
+        return true;
       }
     }
-    return null;
+    return false;
   }
 
-  selectLanguage(language: Language): void {
+  selectLanguage(language: TgLanguage): void {
     this.currentLanguage = language;
     this.translateService.use(language.code);
     this.isOpen = false;
@@ -662,8 +649,8 @@ export class LanguageSelectorComponent implements OnInit {
     this.isOpen = !this.isOpen;
   }
 
-  getDisplayName(language: Language): string {
-    return language.nativeName || language.englishName || language.code.toUpperCase();
+  getDisplayName(language: TgLanguage): string {
+    return language?.nativeName || language?.englishName || language?.code?.toUpperCase() || '';
   }
 }
 `;
