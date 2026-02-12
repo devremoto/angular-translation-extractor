@@ -23,6 +23,7 @@ import { reverseTranslateFileScope, reverseTranslateFolderScope, reverseTranslat
 import { extractFromJsTs } from "./extractJsTs";
 import { extractFromHtml } from "./extractHtml";
 import { Project, SyntaxKind } from "ts-morph";
+import { json } from 'node:stream/consumers';
 
 
 
@@ -516,6 +517,7 @@ export function activate(context: vscode.ExtensionContext) {
     await runExtractionPipeline(context, folders[0], async (root, cfg, output) => {
       output.appendLine(`[angular-i18n] Scanning ${cfg.srcDir}/ (js/ts/html)...`);
       const found = await scanForStrings({ workspaceRoot: root, cfg });
+      output.appendLine(`[angular-i18n] strings found: ${JSON.stringify(found)}`);
       output.appendLine(`[angular-i18n] Found ${found.length} candidate strings.`);
       return found;
     });

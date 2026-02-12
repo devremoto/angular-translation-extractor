@@ -40,12 +40,6 @@ async function translateText(text: string, targetLang: string, sourceLang?: stri
                 throw new Error(`No translation received`);
             }
 
-            // If translation is same as original (e.g. "Twitter" -> "Twitter"), 
-            // return empty string so it can be handled as untranslated/fallback
-            if (translated === text) {
-                return "";
-            }
-
             return translated;
         }
         throw new Error(`Invalid response format`);
