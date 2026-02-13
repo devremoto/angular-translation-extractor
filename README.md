@@ -2,6 +2,8 @@
 ![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/AdilsondeAlmeidaPedro.angular-translation-extractor?style=flat-square)
 ![Visual Studio Marketplace Rating](https://img.shields.io/visual-studio-marketplace/r/AdilsondeAlmeidaPedro.angular-translation-extractor?style=flat-square)
 
+--------------
+
 A VS Code extension that automatically extracts hard-coded user-facing strings from your Angular source code, generates organized i18n JSON files with support for multiple locales, and automatically replaces strings in your source code with translation keys.
 
 ## Features
