@@ -24,7 +24,11 @@
     "Other"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:json",
+    "onLanguage:jsonc"
+  ],
   "contributes": {
     "commands": [
       {
@@ -66,6 +70,21 @@
         "command": "angularTranslation.insertSelector",
         "title": "Insert Language Selector",
         "category": "Angular Translation"
+      },
+      {
+        "command": "angularTranslation.pruneSelectedKeys",
+        "title": "Prune Selected Translation Keys (JSON)",
+        "category": "Angular Translation"
+      },
+      {
+        "command": "angularTranslation.excludeWorkspacePath",
+        "title": "Exclude from Workspace Scan",
+        "category": "Angular Translation"
+      },
+      {
+        "command": "angularTranslation.clearWorkspaceState",
+        "title": "Clear i18n Workspace State",
+        "category": "Angular Translation"
       }
     ],
     "submenus": [
@@ -93,21 +112,21 @@
         {
           "submenu": "angularTranslation.menu",
           "group": "navigation",
-          "when": "explorerResourceIsFolder || resourceLangId == typescript || resourceLangId == html || resourceExtname == .ts || resourceExtname == .html"
+          "when": "resourceScheme == file"
         }
       ],
       "editor/context": [
         {
           "submenu": "angularTranslation.menu",
           "group": "navigation",
-          "when": "resourceLangId == typescript || resourceLangId == html"
+          "when": "resourceLangId == typescript || resourceLangId == html || resourceLangId == json || resourceLangId == jsonc"
         }
       ],
       "angularTranslation.menu": [
         {
           "command": "angularTranslation.extract",
           "group": "1_extract",
-          "when": "!editorFocus || !editorHasSelection"
+          "when": "(!editorFocus || !editorHasSelection) && (!(resourceLangId == json || resourceLangId == jsonc || resourceExtname == .json) || angularTranslation.isDefaultLocaleJsonEditor)"
         },
         {
           "command": "angularTranslation.extractFile",
@@ -143,6 +162,16 @@
           "command": "angularTranslation.insertSelector",
           "group": "3_utils",
           "when": "resourceLangId == html || resourceExtname == .html"
+        },
+        {
+          "command": "angularTranslation.pruneSelectedKeys",
+          "group": "3_utils",
+          "when": "editorFocus && editorHasSelection && angularTranslation.isDefaultLocaleJsonEditor"
+        },
+        {
+          "command": "angularTranslation.excludeWorkspacePath",
+          "group": "3_utils",
+          "when": "resourceScheme == file"
         }
       ]
     },

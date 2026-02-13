@@ -19,7 +19,7 @@ import { updateMainTs } from "./updateMainTs";
 import { runTranslateCommand } from "./translate";
 import { updateAngularJson } from "./updateAngularJson";
 import { captureConsoleLogs } from "./console-capture";
-import { reverseTranslateFileScope, reverseTranslateFolderScope, reverseTranslateSelectionScope } from './reverse';
+import { reverseTranslateFileScope, reverseTranslateFolderScope, reverseTranslateSelectionScope, reverseTranslateSelectedKeysInWorkspace } from './reverse';
 import { extractFromJsTs } from "./extractJsTs";
 import { extractFromHtml } from "./extractHtml";
 import { Project, SyntaxKind } from "ts-morph";
@@ -104,6 +104,19 @@ async function loadAndNormalizeLanguages(workspaceRoot: string, languagesJsonPat
 
   await fs.writeFile(abs, JSON.stringify(normalized, null, 2) + "\n", "utf8");
   return normalized;
+}
+
+async function getDefaultLocaleCodeFromLanguagesFile(
+  workspaceRoot: string,
+  languagesJsonPath: string
+): Promise<string | undefined> {
+  const abs = path.isAbsolute(languagesJsonPath)
+    ? languagesJsonPath
+    : path.join(workspaceRoot, languagesJsonPath);
+
+  const raw = await readJsonIfExists<LanguageEntry[]>(abs, []);
+  const normalized = normalizeLanguages(raw);
+  return normalized.find(l => l.default === true)?.code;
 }
 
 function isPackageInstalled(pkgName: string, root: string, output?: vscode.OutputChannel): boolean {
@@ -262,6 +275,29 @@ interface DefaultJsonBackup {
   }>;
 }
 
+interface ManagedDefaultSnapshot {
+  baseLocaleCode: string;
+  updatedAt: number;
+  entries: Record<string, string>;
+}
+
+const MANAGED_DEFAULT_SNAPSHOT_KEY = "angular-i18n-managed-default-snapshot-v1";
+
+function hasConsecutiveDuplicatePathSegment(relativePath: string): boolean {
+  const normalized = relativePath
+    .replace(/\\+/g, "/")
+    .split("/")
+    .filter(Boolean);
+
+  for (let i = 1; i < normalized.length - 1; i++) {
+    if (normalized[i] === normalized[i - 1]) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function hasNonEmptyValues(obj: any): boolean {
   if (obj === null || obj === undefined || obj === '') {
     return false;
@@ -282,6 +318,152 @@ function hasNonEmptyValues(obj: any): boolean {
   }
 
   return values.some(value => hasNonEmptyValues(value));
+}
+
+function flattenLocaleEntries(
+  obj: Record<string, unknown>,
+  prefix = "",
+  out: Record<string, string> = {}
+): Record<string, string> {
+  for (const [key, value] of Object.entries(obj ?? {})) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+    if (typeof value === "string") {
+      out[fullKey] = value;
+      continue;
+    }
+
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      flattenLocaleEntries(value as Record<string, unknown>, fullKey, out);
+    }
+  }
+
+  return out;
+}
+
+async function readDefaultLocaleKeyMap(
+  workspaceRoot: string,
+  outputRoot: string,
+  baseLocaleCode: string
+): Promise<Record<string, string>> {
+  const baseFileAbs = path.join(workspaceRoot, outputRoot, `${baseLocaleCode}.json`);
+  const baseJson = await readJsonIfExists<Record<string, unknown>>(baseFileAbs, {});
+  return flattenLocaleEntries(baseJson);
+}
+
+function deleteNestedKey(obj: Record<string, unknown>, keyPath: string): boolean {
+  const parts = keyPath.split(".");
+  const chain: Array<{ parent: Record<string, unknown>; key: string }> = [];
+  let current: Record<string, unknown> | undefined = obj;
+
+  for (const part of parts) {
+    if (!current || typeof current !== "object" || !(part in current)) {
+      return false;
+    }
+    chain.push({ parent: current, key: part });
+    const next = current[part];
+    current = (next && typeof next === "object" && !Array.isArray(next))
+      ? (next as Record<string, unknown>)
+      : undefined;
+  }
+
+  const last = chain[chain.length - 1];
+  if (!last) return false;
+
+  delete last.parent[last.key];
+
+  for (let i = chain.length - 2; i >= 0; i--) {
+    const node = chain[i];
+    const child = node.parent[node.key];
+    if (child && typeof child === "object" && !Array.isArray(child) && Object.keys(child as Record<string, unknown>).length === 0) {
+      delete node.parent[node.key];
+      continue;
+    }
+    break;
+  }
+
+  return true;
+}
+
+async function pruneSelectedKeysFromLocaleFiles(
+  workspaceRoot: string,
+  outputRoot: string,
+  baseLocaleCode: string,
+  localeCodes: string[],
+  keysToPrune: string[]
+): Promise<{ filesUpdated: number; keysRemoved: number }> {
+  let filesUpdated = 0;
+  let keysRemoved = 0;
+
+  const outputAbs = path.join(workspaceRoot, outputRoot);
+  const defaultPattern = new vscode.RelativePattern(outputAbs, `**/${baseLocaleCode}.json`);
+  const defaultFiles = await vscode.workspace.findFiles(defaultPattern, "**/node_modules/**");
+
+  for (const defaultFile of defaultFiles) {
+    const baseDir = path.dirname(defaultFile.fsPath);
+
+    for (const localeCode of localeCodes) {
+      const localeFileAbs = path.join(baseDir, `${localeCode}.json`);
+
+      try {
+        await fs.access(localeFileAbs);
+      } catch {
+        continue;
+      }
+
+      const localeJson = await readJsonIfExists<Record<string, unknown>>(localeFileAbs, {});
+      let changed = false;
+
+      for (const key of keysToPrune) {
+        if (deleteNestedKey(localeJson, key)) {
+          keysRemoved++;
+          changed = true;
+        }
+      }
+
+      if (!changed) {
+        continue;
+      }
+
+      await fs.writeFile(localeFileAbs, JSON.stringify(localeJson, null, 2) + "\n", "utf8");
+      filesUpdated++;
+    }
+  }
+
+  return { filesUpdated, keysRemoved };
+}
+
+function getSelectedPropertyNamesFromJsonText(selectedText: string): Set<string> {
+  const propertyNames = new Set<string>();
+  const keyRegex = /"([^"\\]+)"\s*:/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = keyRegex.exec(selectedText)) !== null) {
+    const keyName = match[1]?.trim();
+    if (keyName) {
+      propertyNames.add(keyName);
+    }
+  }
+
+  return propertyNames;
+}
+
+function resolveDefaultKeysFromSelectedJsonRange(selectedText: string, allDefaultKeys: string[]): string[] {
+  const selectedPropertyNames = getSelectedPropertyNamesFromJsonText(selectedText);
+  if (selectedPropertyNames.size === 0) {
+    return [];
+  }
+
+  const selectedKeys = allDefaultKeys.filter((fullKey) => {
+    const segments = fullKey.split(".");
+    for (const segment of segments) {
+      if (selectedPropertyNames.has(segment)) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  return Array.from(new Set(selectedKeys));
 }
 
 async function backupDefaultJson(
@@ -312,6 +494,11 @@ async function backupDefaultJson(
     for (const fileUri of foundFiles) {
       const fileAbs = fileUri.fsPath;
       const relativePath = path.relative(outputAbs, fileAbs);
+
+      if (hasConsecutiveDuplicatePathSegment(relativePath)) {
+        output.appendLine(`[backup] ✗ Skipping suspicious path with duplicate folder segment: ${relativePath}`);
+        continue;
+      }
 
       try {
         const contentStr = await fs.readFile(fileAbs, 'utf-8');
@@ -386,6 +573,13 @@ async function restoreDefaultJson(
 
     if (backup.files.length === 0) {
       output.appendLine(`[restore] Backup exists but contains no files`);
+      return false;
+    }
+
+    const hasInvalidPath = backup.files.some(file => hasConsecutiveDuplicatePathSegment(file.relativePath));
+    if (hasInvalidPath) {
+      output.appendLine(`[restore] Backup contains invalid duplicate-folder paths. Purging backup snapshot to prevent re-restore.`);
+      await context.workspaceState.update(backupKey, undefined);
       return false;
     }
 
@@ -595,6 +789,23 @@ async function processLocalesAndArtifacts(
   const baseLocaleCode = defaultLang.code;
   output.appendLine(`[angular-i18n] Base locale: ${baseLocaleCode} (from ${defaultLang.englishName})`);
 
+  const previousManagedSnapshot = context.workspaceState.get<ManagedDefaultSnapshot>(MANAGED_DEFAULT_SNAPSHOT_KEY);
+  const previousManagedEntries = previousManagedSnapshot?.baseLocaleCode === baseLocaleCode
+    ? (previousManagedSnapshot.entries ?? {})
+    : {};
+  const currentDefaultEntries = await readDefaultLocaleKeyMap(root, cfg.outputRoot, baseLocaleCode);
+
+  const removedManagedKeys = Object.keys(previousManagedEntries).filter(key => !(key in currentDefaultEntries));
+  const addedManagedKeys = Object.keys(currentDefaultEntries).filter(key => !(key in previousManagedEntries));
+  const hasDefaultKeySetDelta = removedManagedKeys.length > 0 || addedManagedKeys.length > 0;
+
+  if (removedManagedKeys.length > 0) {
+    output.appendLine(`[angular-i18n] Detected ${removedManagedKeys.length} key(s) removed from default locale. Will prune and auto-revert references.`);
+  }
+  if (addedManagedKeys.length > 0) {
+    output.appendLine(`[angular-i18n] Detected ${addedManagedKeys.length} key(s) newly added in default locale. Will sync other locale files.`);
+  }
+
   // Check for language changes
   const storedLangs = context.workspaceState.get<LanguageEntry[]>("angular-i18n-languages", []);
   const oldCodes = new Set(storedLangs.map(l => l.code));
@@ -709,7 +920,7 @@ async function processLocalesAndArtifacts(
   const nothingNew = found.length === 0 || found.every(s => s.isAlreadyTranslated);
 
   // Don't skip if: languages were newly activated, files are missing, translations incomplete, or there are changes
-  if (!hasChanges && !hasMissingFiles && !hasIncompleteTranslations && nothingNew && (options.forceUpdateMode ?? cfg.updateMode) === "merge") {
+  if (!hasChanges && !hasMissingFiles && !hasIncompleteTranslations && !hasDefaultKeySetDelta && nothingNew && (options.forceUpdateMode ?? cfg.updateMode) === "merge") {
     output.appendLine(`[angular-i18n] All strings valid/translated and configuration unchanged. Skipping generation.`);
     return {
       gen: { baseFiles: [], filesProcessed: 0, stringsAdded: 0, keyMapByFile: {} },
@@ -748,7 +959,30 @@ async function processLocalesAndArtifacts(
     languages: generatedLangs,
     found,
     updateMode: effectiveUpdateMode,
+    pruneKeys: removedManagedKeys,
   });
+
+  if (removedManagedKeys.length > 0) {
+    const removedKeyValues = removedManagedKeys.reduce<Record<string, string>>((acc, key) => {
+      const value = previousManagedEntries[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        acc[key] = value;
+      }
+      return acc;
+    }, {});
+
+    const reverseResult = await reverseTranslateSelectedKeysInWorkspace(
+      root,
+      cfg.srcDir,
+      removedKeyValues,
+      cfg.ignoreGlobs,
+      output
+    );
+
+    if (reverseResult.success > 0 || reverseResult.failed > 0) {
+      output.appendLine(`[angular-i18n] Auto-revert completed for removed keys. Success: ${reverseResult.success}, Failed: ${reverseResult.failed}`);
+    }
+  }
 
   // Backup default language files immediately after generation
   // Only backup if we actually generated content (not empty values)
@@ -798,6 +1032,14 @@ async function processLocalesAndArtifacts(
     await performAppConfiguration(root, cfg, baseLocaleCode, output);
   }
 
+  const latestDefaultEntries = await readDefaultLocaleKeyMap(root, cfg.outputRoot, baseLocaleCode);
+  await context.workspaceState.update(MANAGED_DEFAULT_SNAPSHOT_KEY, {
+    baseLocaleCode,
+    updatedAt: Date.now(),
+    entries: latestDefaultEntries,
+  } as ManagedDefaultSnapshot);
+  output.appendLine(`[angular-i18n] Managed default snapshot updated (${Object.keys(latestDefaultEntries).length} keys).`);
+
   output.appendLine(`[angular-i18n] Process complete. Strings added: ${gen.stringsAdded}, Replaced: ${replaceResult.stringsReplaced}`);
 
   // Auto-translate Logic (omitted here for brevity in refactor but kept in main flow if needed)
@@ -819,6 +1061,21 @@ async function runExtractionPipeline(
   const cfg = getConfig();
   const output = vscode.window.createOutputChannel("Angular Translation Extractor");
   output.show(true);
+
+  const normalizeGlob = (value: string) => (value || "").replace(/\\+/g, "/").replace(/^\.\//, "");
+  const normalizedSrcDir = normalizeGlob(cfg.srcDir).replace(/\/+$/, "");
+  const normalizedSkipGlobs = (cfg.skipGlobs || []).map(normalizeGlob);
+  const excludesSourceDir = normalizedSkipGlobs.includes("**/*")
+    || normalizedSkipGlobs.includes("src/**")
+    || normalizedSkipGlobs.includes(`${normalizedSrcDir}/**`)
+    || normalizedSkipGlobs.includes(`${normalizedSrcDir}/**/*`);
+
+  if (excludesSourceDir) {
+    const msg = `Extraction is skipped because i18nExtractor.skipGlobs contains a source exclusion (${normalizedSrcDir}/** or **/*). Remove it from settings and run again.`;
+    output.appendLine(`[angular-i18n] ${msg}`);
+    vscode.window.showWarningMessage(msg);
+    return null;
+  }
 
   try {
     output.appendLine(`[angular-i18n] Checking required npm packages...`);
@@ -898,7 +1155,7 @@ async function executeAutoTranslate(
   const translateJsonFile = mod.translateJsonFile;
   output.appendLine(`[auto-translate] Starting Google Translate...`);
 
-  const effectiveBaseLocale =  baseLocaleCode;
+  const effectiveBaseLocale = baseLocaleCode;
 
   for (const baseFile of baseFiles) {
     const { baseFileAbs, outDirAbs } = baseFile;
@@ -917,8 +1174,8 @@ async function executeAutoTranslate(
       }
 
       const targetLocale = lang.code;
-      const translationTargetLang =  targetLocale;
-      const outputFileName =  targetLocale;
+      const translationTargetLang = targetLocale;
+      const outputFileName = targetLocale;
 
       try {
         output.appendLine(`[auto-translate] Translating ${path.basename(baseFileAbs)} to ${targetLocale}...`);
@@ -965,11 +1222,80 @@ async function runNgBuild(root: string, output: vscode.OutputChannel) {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  const updatePruneSelectedKeysContext = async (editor?: vscode.TextEditor) => {
+    try {
+      const currentEditor = editor ?? vscode.window.activeTextEditor;
+      if (!currentEditor) {
+        await vscode.commands.executeCommand("setContext", "angularTranslation.isDefaultLocaleJsonEditor", false);
+        return;
+      }
+
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders?.length) {
+        await vscode.commands.executeCommand("setContext", "angularTranslation.isDefaultLocaleJsonEditor", false);
+        return;
+      }
+
+      const cfg = getConfig();
+      const root = folders[0].uri.fsPath;
+      const defaultLocaleCode = await getDefaultLocaleCodeFromLanguagesFile(root, cfg.languagesJsonPath);
+      if (!defaultLocaleCode) {
+        await vscode.commands.executeCommand("setContext", "angularTranslation.isDefaultLocaleJsonEditor", false);
+        return;
+      }
+
+      const fileName = path.basename(currentEditor.document.uri.fsPath);
+      const isJsonDocument = ["json", "jsonc"].includes(currentEditor.document.languageId)
+        || path.extname(fileName).toLowerCase() === ".json";
+      const isDefaultLocaleJson = isJsonDocument && fileName === `${defaultLocaleCode}.json`;
+
+      await vscode.commands.executeCommand("setContext", "angularTranslation.isDefaultLocaleJsonEditor", isDefaultLocaleJson);
+    } catch {
+      await vscode.commands.executeCommand("setContext", "angularTranslation.isDefaultLocaleJsonEditor", false);
+    }
+  };
+
+  void updatePruneSelectedKeysContext();
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      void updatePruneSelectedKeysContext(editor);
+    })
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument(() => {
+      void updatePruneSelectedKeysContext();
+    })
+  );
+
   const disposable = vscode.commands.registerCommand("angularTranslation.extract", async () => {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) {
       vscode.window.showErrorMessage("Open a workspace folder first.");
       return;
+    }
+
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor) {
+      const activeFile = activeEditor.document.uri.fsPath;
+      const activeFileName = path.basename(activeFile);
+      const isJsonEditor = ["json", "jsonc"].includes(activeEditor.document.languageId)
+        || path.extname(activeFileName).toLowerCase() === ".json";
+
+      if (isJsonEditor) {
+        const root = folders[0].uri.fsPath;
+        const cfg = getConfig();
+        const defaultLocaleCode = await getDefaultLocaleCodeFromLanguagesFile(root, cfg.languagesJsonPath);
+
+        if (defaultLocaleCode) {
+          const expectedDefaultFileName = `${defaultLocaleCode}.json`;
+          if (activeFileName !== expectedDefaultFileName) {
+            vscode.window.showErrorMessage(
+              `Extract translations (All app) can only be triggered from the default locale JSON file (${expectedDefaultFileName}) when launched from a JSON editor.`
+            );
+            return;
+          }
+        }
+      }
     }
 
     await runExtractionPipeline(context, folders[0], async (root, cfg, output) => {
@@ -1442,6 +1768,275 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(reverseSelectionDisposable);
+
+  const pruneSelectedKeysDisposable = vscode.commands.registerCommand(
+    "angularTranslation.pruneSelectedKeys",
+    async () => {
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders?.length) {
+        vscode.window.showErrorMessage("Open a workspace folder first.");
+        return;
+      }
+
+      const root = folders[0].uri.fsPath;
+      const cfg = getConfig();
+      const output = vscode.window.createOutputChannel("Angular Translation Extractor");
+      output.show(true);
+
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showErrorMessage("Open the default JSON file and select properties to prune.");
+        return;
+      }
+
+      if (editor.selection.isEmpty) {
+        vscode.window.showErrorMessage("Select a JSON text range with properties to prune.");
+        return;
+      }
+
+      const currentFile = editor.document.uri.fsPath;
+      if (path.extname(currentFile).toLowerCase() !== ".json") {
+        vscode.window.showErrorMessage("Prune Selected Keys can only run from a JSON file.");
+        return;
+      }
+
+      try {
+        const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
+        const defaultLang = langs.find(l => l.default === true);
+        if (!defaultLang) {
+          throw new Error(`No language marked with "default": true in ${cfg.languagesJsonPath}.`);
+        }
+
+        const baseLocaleCode = defaultLang.code;
+        const expectedDefaultFileName = `${baseLocaleCode}.json`;
+        const currentFileName = path.basename(currentFile);
+
+        if (currentFileName !== expectedDefaultFileName) {
+          vscode.window.showErrorMessage(
+            `Prune Selected Keys can only be executed from the default locale file (${expectedDefaultFileName}).`
+          );
+          return;
+        }
+
+        const defaultEntries = await readDefaultLocaleKeyMap(root, cfg.outputRoot, baseLocaleCode);
+        const allKeys = Object.keys(defaultEntries).sort((a, b) => a.localeCompare(b));
+
+        if (allKeys.length === 0) {
+          vscode.window.showInformationMessage("No keys found in default locale JSON.");
+          return;
+        }
+
+        const selectedText = editor.document.getText(editor.selection);
+        const selectedKeys = resolveDefaultKeysFromSelectedJsonRange(selectedText, allKeys);
+
+        if (selectedKeys.length === 0) {
+          vscode.window.showErrorMessage("No translation properties were detected in the selected JSON range.");
+          return;
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+          `Remove ${selectedKeys.length} key(s) from locale files and auto-revert usages in source files?`,
+          { modal: true },
+          "Remove"
+        );
+
+        if (confirm !== "Remove") {
+          return;
+        }
+
+        output.appendLine(`[angular-i18n] Manual prune started for ${selectedKeys.length} key(s).`);
+
+        const selectedKeyValues = selectedKeys.reduce<Record<string, string>>((acc, key) => {
+          const value = defaultEntries[key];
+          if (typeof value === "string" && value.trim().length > 0) {
+            acc[key] = value;
+          }
+          return acc;
+        }, {});
+
+        const reverseResult = await reverseTranslateSelectedKeysInWorkspace(
+          root,
+          cfg.srcDir,
+          selectedKeyValues,
+          cfg.ignoreGlobs,
+          output
+        );
+
+        const localeCodes = Array.from(new Set(langs.map(l => l.code)));
+        const pruneResult = await pruneSelectedKeysFromLocaleFiles(
+          root,
+          cfg.outputRoot,
+          baseLocaleCode,
+          localeCodes,
+          selectedKeys
+        );
+
+        await backupDefaultJson(context, root, cfg.outputRoot, baseLocaleCode, output);
+
+        const latestDefaultEntries = await readDefaultLocaleKeyMap(root, cfg.outputRoot, baseLocaleCode);
+        await context.workspaceState.update(MANAGED_DEFAULT_SNAPSHOT_KEY, {
+          baseLocaleCode,
+          updatedAt: Date.now(),
+          entries: latestDefaultEntries,
+        } as ManagedDefaultSnapshot);
+
+        output.appendLine(`[angular-i18n] Manual prune complete. Files updated: ${pruneResult.filesUpdated}, keys removed: ${pruneResult.keysRemoved}.`);
+        output.appendLine(`[angular-i18n] Auto-revert result. Success: ${reverseResult.success}, Failed: ${reverseResult.failed}.`);
+        output.appendLine(`[angular-i18n] Managed default snapshot updated (${Object.keys(latestDefaultEntries).length} keys).`);
+
+        await runNgBuild(root, output);
+
+        vscode.window.showInformationMessage(
+          `Removed ${selectedKeys.length} key(s). Reverted ${reverseResult.success} occurrence(s) in source.`
+        );
+      } catch (err: unknown) {
+        const msg = (err as Record<string, unknown>)?.message ? String((err as Record<string, unknown>).message) : String(err);
+        output.appendLine(`[angular-i18n] Manual prune failed ❌ ${msg}`);
+        vscode.window.showErrorMessage(`Prune selected keys failed: ${msg}`);
+      }
+    }
+  );
+
+  context.subscriptions.push(pruneSelectedKeysDisposable);
+
+  const excludeWorkspacePathDisposable = vscode.commands.registerCommand(
+    "angularTranslation.excludeWorkspacePath",
+    async (uri?: vscode.Uri) => {
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders?.length) {
+        vscode.window.showErrorMessage("Open a workspace folder first.");
+        return;
+      }
+
+      const workspaceFolder = folders[0];
+      const root = workspaceFolder.uri.fsPath;
+
+      const targetPath = uri?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
+      if (!targetPath) {
+        vscode.window.showErrorMessage("Select a file or folder to exclude from extraction.");
+        return;
+      }
+
+      const normalizedRoot = path.resolve(root);
+      const normalizedTarget = path.resolve(targetPath);
+      const rel = path.relative(normalizedRoot, normalizedTarget);
+
+      if (rel.startsWith("..") || path.isAbsolute(rel)) {
+        vscode.window.showErrorMessage("Selected path is outside the current workspace.");
+        return;
+      }
+
+      let stat: fsSync.Stats;
+      try {
+        stat = fsSync.statSync(normalizedTarget);
+      } catch {
+        vscode.window.showErrorMessage("Could not read the selected path.");
+        return;
+      }
+
+      const toPosix = (value: string) => value.split(path.sep).join("/");
+      const relPosix = toPosix(rel);
+      const skipGlob = relPosix === "" ? "**/*" : (stat.isDirectory() ? `${relPosix}/**` : relPosix);
+
+      if (skipGlob === "**/*") {
+        const confirm = await vscode.window.showWarningMessage(
+          "This will exclude the entire workspace from extraction. Continue?",
+          { modal: true },
+          "Exclude"
+        );
+        if (confirm !== "Exclude") {
+          return;
+        }
+      }
+
+      const config = vscode.workspace.getConfiguration("i18nExtractor", workspaceFolder.uri);
+      const current = config.get<string[]>("skipGlobs", []);
+
+      if (current.includes(skipGlob)) {
+        const stateKeys = context.workspaceState.keys();
+        const confirmClear = await vscode.window.showWarningMessage(
+          `Path is already excluded: ${skipGlob}. Remove ${stateKeys.length} workspace state item(s)?`,
+          { modal: true },
+          "Remove"
+        );
+
+        if (confirmClear === "Remove") {
+          const cleared = await clearAllI18nWorkspaceState(context, workspaceFolder);
+          vscode.window.showInformationMessage(`i18n workspace state cleared (${cleared} item(s)).`);
+          return;
+        }
+
+        vscode.window.showInformationMessage(`Path is already excluded: ${skipGlob}`);
+        return;
+      }
+
+      const updated = [...current, skipGlob];
+      await config.update("skipGlobs", updated, vscode.ConfigurationTarget.Workspace);
+
+      if (skipGlob === "**/*") {
+        const stateKeys = context.workspaceState.keys();
+        const confirmClear = await vscode.window.showWarningMessage(
+          `Remove ${stateKeys.length} workspace state item(s) while excluding the entire workspace?`,
+          { modal: true },
+          "Remove"
+        );
+        if (confirmClear === "Remove") {
+          const cleared = await clearAllI18nWorkspaceState(context, workspaceFolder);
+          vscode.window.showInformationMessage(`Excluded from extraction: **/* (cleared ${cleared} workspaceState item(s))`);
+          return;
+        }
+
+        vscode.window.showInformationMessage("Excluded from extraction: **/* (workspaceState preserved)");
+        return;
+      }
+
+      vscode.window.showInformationMessage(`Excluded from extraction: ${skipGlob}`);
+    }
+  );
+
+  context.subscriptions.push(excludeWorkspacePathDisposable);
+
+  const clearWorkspaceStateDisposable = vscode.commands.registerCommand(
+    "angularTranslation.clearWorkspaceState",
+    async (uri?: vscode.Uri) => {
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders?.length) {
+        vscode.window.showErrorMessage("Open a workspace folder first.");
+        return;
+      }
+
+      const workspaceFolder = uri ? vscode.workspace.getWorkspaceFolder(uri) ?? folders[0] : folders[0];
+      const _root = workspaceFolder.uri.fsPath;
+
+      const stateKeys = context.workspaceState.keys();
+
+      const confirm = await vscode.window.showWarningMessage(
+        `Remove ${stateKeys.length} workspace state item(s)? This cannot be undone.`,
+        { modal: true },
+        "Remove"
+      );
+
+      if (confirm !== "Remove") return;
+
+      const cleared = await clearAllI18nWorkspaceState(context, workspaceFolder);
+      vscode.window.showInformationMessage(`i18n workspace state cleared (${cleared} item(s)).`);
+    }
+  );
+
+  context.subscriptions.push(clearWorkspaceStateDisposable);
+
+  async function clearAllI18nWorkspaceState(context: vscode.ExtensionContext, _workspaceFolder: vscode.WorkspaceFolder): Promise<number> {
+    const keys = context.workspaceState.keys();
+    for (const k of keys) {
+      try {
+        // Clear key
+        await context.workspaceState.update(k, undefined);
+      } catch {
+        // ignore individual failures
+      }
+    }
+    return keys.length;
+  }
 
   // Register insert Language Selector command
   const insertSelectorDisposable = vscode.commands.registerCommand(

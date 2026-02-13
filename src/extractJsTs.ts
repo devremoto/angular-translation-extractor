@@ -257,6 +257,14 @@ function evaluateAggressiveModeForFunctionArg(
 
   const contextValue = fnArgContext?.context ?? "";
   const sourceValue = fnArgContext?.callSource ?? "";
+
+  if (/^(?:this\.)?signal\(arg#1\)$/.test(contextValue)) {
+    return {
+      allowed: true,
+      reason: "allowed-by-signal-arg-rule"
+    };
+  }
+
   if (
     matchesRegexList(contextRegexList, contextValue)
     || matchesRegexList(callRegexList, sourceValue)
@@ -597,6 +605,9 @@ function inMessageContext(p: any): boolean {
     // Direct function calls: alert, confirm, prompt, throw
     if (callee?.type === "Identifier") {
       const name = callee.name;
+      if (name === "signal") {
+        return true;
+      }
       if (["alert", "confirm", "prompt", "Error", "TypeError", "RangeError", "ReferenceError",
         "SyntaxError", "URIError", "EvalError"].includes(name)) {
         return true;
@@ -621,6 +632,10 @@ function inMessageContext(p: any): boolean {
 
       // window.alert, window.confirm, window.prompt
       if (objName === "window" && ["alert", "confirm", "prompt"].includes(propName)) {
+        return true;
+      }
+
+      if (propName === "signal") {
         return true;
       }
 

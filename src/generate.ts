@@ -7,6 +7,47 @@ import { makeKey } from "./keygen";
 export type LocaleJson = Record<string, any>;
 export type KeyMapByFile = Record<string, Record<string, string>>;
 
+function deleteNestedValue(obj: Record<string, any>, path: string): boolean {
+  const parts = path.split(".");
+  const chain: Array<{ parent: Record<string, any>; key: string }> = [];
+  let current: any = obj;
+
+  for (const part of parts) {
+    if (!current || typeof current !== "object" || !(part in current)) {
+      return false;
+    }
+    chain.push({ parent: current, key: part });
+    current = current[part];
+  }
+
+  const last = chain[chain.length - 1];
+  if (!last) return false;
+  delete last.parent[last.key];
+
+  for (let i = chain.length - 2; i >= 0; i--) {
+    const { parent, key } = chain[i];
+    const child = parent[key];
+    if (
+      child &&
+      typeof child === "object" &&
+      !Array.isArray(child) &&
+      Object.keys(child).length === 0
+    ) {
+      delete parent[key];
+      continue;
+    }
+    break;
+  }
+
+  return true;
+}
+
+function pruneLocaleKeys(locale: LocaleJson, keysToPrune: Iterable<string>): void {
+  for (const key of keysToPrune) {
+    deleteNestedValue(locale, key);
+  }
+}
+
 function normalizeLocaleJson(obj: LocaleJson): LocaleJson {
   const normalized: LocaleJson = {};
 
@@ -80,16 +121,18 @@ export async function generatePerFileLocales(opts: {
   languages: LanguageEntry[];
   found: FoundString[];
   updateMode: "merge" | "overwrite" | "recreate";
+  pruneKeys?: string[];
 }): Promise<{
   baseFiles: Array<{ baseFileAbs: string; outDirAbs: string; targets: string[] }>;
   filesProcessed: number;
   stringsAdded: number;
   keyMapByFile: KeyMapByFile;
+  baseKeys: string[];
 }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode, pruneKeys } = opts;
 
 
-  return generateAsSingleFilePerLanguage({ workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode });
+  return generateAsSingleFilePerLanguage({ workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode, pruneKeys });
 
 
 
@@ -103,13 +146,15 @@ async function generateAsSingleFilePerLanguage(opts: {
   languages: LanguageEntry[];
   found: FoundString[];
   updateMode: "merge" | "overwrite" | "recreate";
+  pruneKeys?: string[];
 }): Promise<{
   baseFiles: Array<{ baseFileAbs: string; outDirAbs: string; targets: string[] }>;
   filesProcessed: number;
   stringsAdded: number;
   keyMapByFile: KeyMapByFile;
+  baseKeys: string[];
 }> {
-  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode } = opts;
+  const { workspaceRoot, srcDir, outputRoot, baseLocaleCode, languages, found, updateMode, pruneKeys = [] } = opts;
 
   const outRootAbs = path.join(workspaceRoot, outputRoot);
   await ensureDir(outRootAbs);
@@ -126,6 +171,7 @@ async function generateAsSingleFilePerLanguage(opts: {
   // For base language: recreate=start fresh, merge/overwrite=merge with existing
   const existingBaseRaw = updateMode === "recreate" ? {} : await readJsonIfExists<LocaleJson>(baseFileAbs, {});
   const existingBase = normalizeLocaleJson(existingBaseRaw);
+  const pruneKeySet = new Set(pruneKeys);
   const existingKeys = getAllKeys(existingBase);
   const usedKeys = new Set(existingKeys);
   // Deep copy to avoid shared references
@@ -147,15 +193,18 @@ async function generateAsSingleFilePerLanguage(opts: {
     // Build prefix from file path
     const relFromSrc = foundString.fileRelFromSrc ?? path.relative(path.join(workspaceRoot, srcDir), fileAbs);
     const relNoExt = withoutExt(relFromSrc);
-    const prefix = relNoExt
-      .split("/")
-      .map(segment =>
-        (segment || "")
-          .toUpperCase()
-          .replace(/[^A-Z0-9]+/g, "_")
-          .replace(/^_+|_+$/g, "") || "SEG"
-      )
-      .join(".");
+    const rawSegments = relNoExt.split("/").map(segment =>
+      (segment || "")
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "") || "SEG"
+    );
+    // Collapse consecutive duplicate segments (e.g. app/app) to avoid repeated keys like APP.APP
+    const dedupedSegments: string[] = [];
+    for (let i = 0; i < rawSegments.length; i++) {
+      if (i === 0 || rawSegments[i] !== rawSegments[i - 1]) dedupedSegments.push(rawSegments[i]);
+    }
+    const prefix = dedupedSegments.join(".");
 
     // Initialize keymap for this file if needed
     if (!keyMapByFile[fileAbs]) {
@@ -164,6 +213,9 @@ async function generateAsSingleFilePerLanguage(opts: {
 
     // Handle existing keys
     if (foundString.isAlreadyTranslated) {
+      if (pruneKeySet.has(foundString.text)) {
+        continue;
+      }
       if (!getNestedValue(base, foundString.text)) {
         setNestedValue(base, foundString.text, "");
         stringsAdded++;
@@ -184,6 +236,10 @@ async function generateAsSingleFilePerLanguage(opts: {
     if (key) {
       keyMapByFile[fileAbs][foundString.text] = key;
     }
+  }
+
+  if (pruneKeySet.size > 0) {
+    pruneLocaleKeys(base, pruneKeySet);
   }
 
   // Write base language file
@@ -217,6 +273,10 @@ async function generateAsSingleFilePerLanguage(opts: {
       }
     }
 
+    if (pruneKeySet.size > 0) {
+      pruneLocaleKeys(merged, pruneKeySet);
+    }
+
     await fs.writeFile(targetAbs, JSON.stringify(merged, null, 2) + "\n", "utf8");
   }
 
@@ -224,7 +284,8 @@ async function generateAsSingleFilePerLanguage(opts: {
     baseFiles: [{ baseFileAbs, outDirAbs: outRootAbs, targets: targetLocales }],
     filesProcessed: 1,  // Single consolidated file
     stringsAdded,
-    keyMapByFile
+    keyMapByFile,
+    baseKeys
   };
 }
 

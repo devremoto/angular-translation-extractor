@@ -53,7 +53,7 @@ export async function loadTranslationKeyMap(
 
         // Determine which language code to search for
         const searchCode = defaultLangCode || baseLocaleCode;
-        const finalSearchCode =  searchCode;
+        const finalSearchCode = searchCode;
 
         logger(`[reverse] 🔍 Default language: ${defaultLangCode || 'not found'}`);
         logger(`[reverse] 🔍 Base locale code: ${baseLocaleCode}`);
@@ -175,12 +175,12 @@ const REVERSE_PATTERNS: ReversePattern[] = [
     },
     // TS calls: .instant('KEY'), .get('KEY')
     {
-        regex: /(?:\bthis\.\w+|\btranslate)\.instant\s*\(\s*(['"])([^'"]+)\1\s*\)/gms,
+        regex: /(?:\bthis\.\w+|\btranslate)\s*\??\.\s*instant\s*\(\s*(['"`])([^'"`]+)\1\s*\)/gms,
         type: PATTERN_TYPES.TS_CALL,
         keyGroup: 2
     },
     {
-        regex: /(?:\bthis\.\w+|\btranslate)\.get\s*\(\s*(['"])([^'"]+)\1\s*\)/gms,
+        regex: /(?:\bthis\.\w+|\btranslate)\s*\??\.\s*get\s*\(\s*(['"`])([^'"`]+)\1\s*\)/gms,
         type: PATTERN_TYPES.TS_CALL,
         keyGroup: 2
     },
@@ -652,7 +652,7 @@ export async function reverseTranslateSelectionScope(
 
     try {
         log(`[reverse] Loading translations...`);
-        const keyMap = await loadTranslationKeyMap(workspaceRoot, outputRoot, languagesJsonPath, baseLocaleCode,  log);
+        const keyMap = await loadTranslationKeyMap(workspaceRoot, outputRoot, languagesJsonPath, baseLocaleCode, log);
 
         if (keyMap.size === 0) {
             return {
@@ -686,6 +686,51 @@ export async function reverseTranslateSelectionScope(
             success: 0,
             failed: 0,
             errors: [`Error: ${error}`],
+        };
+    }
+}
+
+export async function reverseTranslateSelectedKeysInWorkspace(
+    workspaceRoot: string,
+    srcDir: string,
+    removedKeyValues: Record<string, string>,
+    ignoreGlobs: string[],
+    outputChannel?: { appendLine: (line: string) => void }
+): Promise<{ success: number; failed: number; errors: string[] }> {
+    const log = (msg: string) => {
+        console.log(msg);
+        if (outputChannel) outputChannel.appendLine(msg);
+    };
+
+    try {
+        const keyEntries = Object.entries(removedKeyValues).filter(
+            ([key, value]) => typeof key === "string" && key.trim().length > 0 && typeof value === "string" && value.trim().length > 0
+        );
+
+        if (keyEntries.length === 0) {
+            return { success: 0, failed: 0, errors: [] };
+        }
+
+        const keyMap = new Map<string, string>(keyEntries);
+        const srcAbs = path.join(workspaceRoot, srcDir);
+
+        log(`[reverse] 🔁 Auto-revert check for ${keyEntries.length} removed key(s)`);
+        const matches = await findI18nMatches(srcAbs, keyMap, ignoreGlobs, srcAbs);
+
+        if (matches.length === 0) {
+            log(`[reverse] ℹ No source references found for removed keys.`);
+            return { success: 0, failed: 0, errors: [] };
+        }
+
+        log(`[reverse] 🔁 Reverting ${matches.length} removed key reference(s)`);
+        return await applyReverseTranslations(matches, outputChannel);
+    } catch (error) {
+        const msg = `Error: ${error}`;
+        log(`[reverse] ❌ ${msg}`);
+        return {
+            success: 0,
+            failed: 0,
+            errors: [msg],
         };
     }
 }

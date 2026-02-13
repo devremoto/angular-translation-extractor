@@ -370,6 +370,12 @@ function findLastImportIndex(content: string): number {
     return lastIndex;
 }
 
+function normalizeImportFormatting(content: string): string {
+    return content
+        .replace(/;\s*(?=import\s)/g, ";\n")
+        .replace(/\n{3,}/g, "\n\n");
+}
+
 function extractComponentMetadata(content: string, startIdx: number): string | null {
     let depth = 1;
     let i = startIdx;
@@ -485,6 +491,12 @@ export async function addTranslateServiceInjection(tsFile: string, bootstrapStyl
 
     if (!modified && content === original) {
         return false;
+    }
+
+    const normalizedContent = normalizeImportFormatting(content);
+    if (normalizedContent !== content) {
+        content = normalizedContent;
+        modified = true;
     }
 
     await fs.writeFile(tsFile, content, "utf8");
