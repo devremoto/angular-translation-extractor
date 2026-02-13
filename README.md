@@ -1,19 +1,23 @@
-# Angular Translation Extractor
+![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/AdilsondeAlmeidaPedro.angular-tanslation-extractor?style=flat-square)
+![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/AdilsondeAlmeidaPedro.angular-tanslation-extractor?style=flat-square)
+![Visual Studio Marketplace Rating](https://img.shields.io/visual-studio-marketplace/r/AdilsondeAlmeidaPedro.angular-tanslation-extractor?style=flat-square)
 
 A VS Code extension that automatically extracts hard-coded user-facing strings from your Angular source code, generates organized i18n JSON files with support for multiple locales, and automatically replaces strings in your source code with translation keys.
 
 ## Features
 
 - 🔍 **Automatic String Extraction** - Scans JS/TS/HTML files for user-facing strings
-- 📁 **Per-File Organization** - Generates separate locale files for each component with replicated folder structure
-- 🔄 **Source Code Transformation** - Automatically replaces strings with translation keys (`{{ 'KEY' | translate }}` in HTML, `translateService.translate('KEY')` in TS)
+- 📁 **Consolidated Locale Output** - Generates one locale JSON per language in `outputRoot` (for example `en-US.json`, `pt-BR.json`)
+- 🔄 **Source Code Transformation** - Replaces strings with translation keys (`{{ 'KEY' | translate }}` in HTML, `this.translate.instant('KEY')` in TS)
 - 🧩 **Auto-Import TranslateModule** - Automatically adds TranslateModule to component imports arrays
-- 💉 **Auto-Inject TranslateService** - Automatically injects TranslateService into TypeScript component constructors
+- 💉 **Auto-Inject TranslateService** - Automatically injects TranslateService in TS files (constructor or `inject()` style)
 - 🌍 **Smart Language Handling** - Generate files for specific locales (en-US) or main languages (en) with automatic fallback
 - 🎯 **Active Language Filtering** - Generate only active languages from your configuration
 - 🔑 **Nested Key Structure** - UPPERCASE keys with underscores in hierarchical JSON format
 - ✨ **Auto-fill Metadata** - Automatically generates language names and flags
 - 🔄 **Translation Preservation** - Existing translations are never overwritten
+- ✂️ **Prune + Auto-Revert** - Remove selected keys from default locale JSON and sync deletion/revert across workspace
+- 🧹 **Workspace Controls** - Exclude paths from scan and clear extension workspace state from commands/menu
 - 🚫 **Smart Filtering** - Automatically excludes technical strings, imports, object keys, state object values
 - 📦 **Custom Loader Generator** - Creates optimized Angular HttpClient loader with language fallback support
 - 🎨 **main.ts Auto-Wiring** - Automatically configures TranslateModule in your Angular bootstrap
@@ -136,7 +140,7 @@ src/components/LoginForm.ts
 **Generated translations:**
 
 ```
-src/assets/I18n/components/LoginForm/
+src/assets/i18n/
   ├── en-US.json
   ├── pt-BR.json
   └── es-ES.json
@@ -1256,9 +1260,19 @@ If two different strings would generate the same key, the extension automaticall
 
 ## Commands
 
-| Command                           | ID                           | Description                                        |
-| --------------------------------- | ---------------------------- | -------------------------------------------------- |
-| **Angular: Extract translations** | `angularTranslation.extract` | Scans source files and generates locale JSON files |
+| Command                                           | ID                                               | Description                                                            |
+| ------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------- |
+| **Extract translations (All app)**                | `angularTranslation.extract`                     | Scan full source, generate/sync locale files, replace source strings   |
+| **Extract translations (File)**                   | `angularTranslation.extractFile`                 | Extract and replace strings for one file                               |
+| **Extract translations (Selection)**              | `angularTranslation.extractSelection`            | Extract selected text and replace with `translate.instant(...)` / pipe |
+| **Extract Selection into ( 'KEY' \| translate )** | `angularTranslation.extractSelectionParenthesis` | Extract selected expression into parenthesized pipe form               |
+| **Reverse Translate (Folder)**                    | `angularTranslation.reverseFromFolder`           | Revert translated keys back to source strings in a folder              |
+| **Reverse Translate (File)**                      | `angularTranslation.reverseFromFile`             | Revert translated keys in a single file                                |
+| **Reverse Translate (Selection)**                 | `angularTranslation.reverseSelection`            | Revert translated keys only in selected range                          |
+| **Prune Selected Translation Keys (JSON)**        | `angularTranslation.pruneSelectedKeys`           | Remove selected keys from locale files and auto-revert usages          |
+| **Exclude from Workspace Scan**                   | `angularTranslation.excludeWorkspacePath`        | Add selected file/folder to `i18nExtractor.skipGlobs`                  |
+| **Clear i18n Workspace State**                    | `angularTranslation.clearWorkspaceState`         | Clear extension workspace state with confirmation                      |
+| **Insert Language Selector**                      | `angularTranslation.insertSelector`              | Insert selector component tag in HTML and wire import                  |
 
 ## Requirements
 
@@ -1284,7 +1298,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE.txt) 
 If you encounter any issues or have questions:
 
 1. Check the [Known Limitations](#-known-limitations) section
-2. Search existing [issues](https://github.com/devremoto/angular-template-mover/issues)
+2. Search existing [issues](https://github.com/devremoto/angular-tanslation-extractor/issues)
 3. Create a new issue with detailed reproduction steps
 
 ## ⭐ Acknowledgments
@@ -1295,7 +1309,16 @@ If you encounter any issues or have questions:
 
 ---
 
-**Enjoy coding with Angular Template Mover! 🎉**
+## 💖 Support My Work
+
+I build and maintain open-source projects to help the developer community.  
+If you find my work useful, please consider supporting future development! 🙌
+
+[![Support on Patreon](https://img.shields.io/badge/Patreon-F96854?logo=patreon&logoColor=white)](https://patreon.com/devremoto)
+[![Buy Me a Coffee on Ko-fi](https://img.shields.io/badge/Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/devremoto)
+[![Sponsor on GitHub](https://img.shields.io/badge/GitHub%20Sponsors-181717?logo=github&logoColor=white)](https://github.com/sponsors/devremoto)
+
+**Enjoy coding with Angular Translation Extractor! 🎉**
 
 _Created by [Adilson de Almeida Pedro](https://adilson.almeidapedro.com.br) - Full Stack Developer_
 

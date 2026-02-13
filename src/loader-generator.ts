@@ -74,7 +74,6 @@ The Angular Translation Extractor intelligently scans your TypeScript and HTML f
 ✅ **Extracted strings:**
 - Strings in \`@Component\` decorators (template, selector, etc.)
 - Alert/confirmation messages: \`alert()\`, \`confirm()\`, \`prompt()\`
-- Console messages: \`console.log()\`, \`console.error()\`, \`console.warn()\`
 - Message service calls: \`this.toastr.error()\`, \`this.snackBar.open()\`, \`showMessage()\`
 - Object properties: \`title\`, \`message\`, \`placeholder\`, \`label\`, \`tooltip\`, \`errorMessage\`, etc.
 - HTML text content and attribute values
@@ -235,18 +234,22 @@ When you run the extraction command:
 #### Translation Process Example
 
 \`\`\`
-Base language file: src/assets/I18n/home/en.json
+Base language file: src/assets/i18n/en-US.json
 {
-  "title": "Welcome",
-  "message": "Hello World"
+  "APP": {
+    "HOME": {
+      "TITLE": "Welcome",
+      "MESSAGE": "Hello World"
+    }
+  }
 }
 
 ↓ Translation Service (Google)
 
 Target files:
-- src/assets/I18n/home/pt.json → { "title": "Bem-vindo", "message": "Olá Mundo" }
-- src/assets/I18n/home/es.json → { "title": "Bienvenido", "message": "Hola Mundo" }
-- src/assets/I18n/home/fr.json → { "title": "Bienvenue", "message": "Bonjour le monde" }
+- src/assets/i18n/pt-BR.json
+- src/assets/i18n/es-ES.json
+- src/assets/i18n/fr-FR.json
 \`\`\`
 
 #### Rate Limiting Protection
@@ -436,7 +439,7 @@ Access settings via: **File → Preferences → Settings** → Search for "Angul
 Key settings:
 - \`i18nExtractor.autoTranslate\` - Automatically translate to target languages (default: \`true\`)
 - \`i18nExtractor.autoTranslateDefaultLanguage\` - Translate the default language (default: \`false\`)
-- \`i18nExtractor.outputRoot\` - Where to generate JSON files (default: \`"src/assets/I18n"\`)
+- \`i18nExtractor.outputRoot\` - Where to generate JSON files (default: \`"src/assets/i18n"\`)
 - \`i18nExtractor.googleTranslateDelay\` - Delay between translation requests in milliseconds (default: \`500\`)
 
 
@@ -451,7 +454,7 @@ Key settings:
 
 ## Need Help?
 
-Run the command: **Angular Translation Extractor: Extract Strings** from the VS Code Command Palette (Ctrl+Shift+P)
+Run the command: **Extract translations (All app)** from the VS Code Command Palette (Ctrl+Shift+P)
 `;
 
   const allowOverwrite = updateMode !== "merge";
