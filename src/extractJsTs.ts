@@ -419,6 +419,12 @@ function isProbablyUserFacing(s: string, minLen: number): boolean {
   if (/^[a-f0-9]{8,}$/i.test(t)) return false;
   if (/\{\{[\s\S]*?\}\}|\$\{[\s\S]*?\}/.test(t)) return false;
 
+  // Skip strings that look like CSS selectors (e.g. link[rel="stylesheet"], div.container)
+  if (/^[a-zA-Z0-9\-_]+\[[a-zA-Z0-9\-_]+=["'][^"']+["']\]$/.test(t)) return false;
+
+  // Skip strings containing any HTML tags (e.g. <div style="...">...</div>)
+  if (/<\/?[a-z][\s\S]*>/i.test(t)) return false;
+
   return true;
 }
 
@@ -483,6 +489,21 @@ function inIgnoredContext(p: any): boolean {
   if (parent?.type === "ExportAllDeclaration" || parent?.type === "ExportNamedDeclaration") return true;
 
   if (parent?.type === "ObjectProperty" && parent.key === grand) return true;
+
+  // Ignore specific property subtrees (like fonts: [{class: 'arial', name: 'Arial'}])
+  const parentObjProp = p.findParent?.((pp: any) => pp.isObjectProperty?.());
+  if (parentObjProp) {
+    const keyName = parentObjProp.node.key?.name || parentObjProp.node.key?.value;
+    if (["fonts", "fontFamily", "class", "className", "id", "icon", "svgIcon"].includes(keyName)) {
+      return true;
+    }
+    // Check if we are inside a 'fonts' array (ignoring properties like 'name' inside it)
+    const grandParentObjProp = parentObjProp.findParent?.((pp: any) => pp.isObjectProperty?.());
+    if (grandParentObjProp) {
+      const grandKey = grandParentObjProp.node.key?.name || grandParentObjProp.node.key?.value;
+      if (["fonts", "fontFamily"].includes(grandKey)) return true;
+    }
+  }
 
   if (parent?.type === "MemberExpression" && parent.property === grand && parent.computed) return true;
 

@@ -129,8 +129,13 @@ function isSupportedExt(ext: string): boolean {
 function applyReplacements(content: string, replacements: Replacement[]): string {
     const ordered = [...replacements].sort((a, b) => b.start - a.start);
     let out = content;
+    let lastStart = Infinity;
     for (const r of ordered) {
+        if (r.end > lastStart) {
+            continue; // Skip overlapping replacement to prevent file corruption
+        }
         out = out.slice(0, r.start) + r.text + out.slice(r.end);
+        lastStart = r.start;
     }
     return out;
 }
