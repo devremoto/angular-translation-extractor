@@ -50,6 +50,11 @@ export async function replaceExtractedStrings(opts: {
                 continue;
             }
 
+            // If the item is already translated (e.g. from a previous run or existing CallExpression), skip replacing it.
+            if (item.isAlreadyTranslated) {
+                continue;
+            }
+
             // Check if this is HTML content (from .html file or inline template in .ts file)
             const isHtmlContent = item.kind === "html-text" || item.kind === "html-attr" || item.kind === "html-interpolation";
 

@@ -18,7 +18,6 @@ import { replaceExtractedStrings, ensureComponentStructure, addTranslateModuleIm
 import { updateMainTs } from "./updateMainTs";
 import { runTranslateCommand } from "./translate";
 import { updateAngularJson } from "./updateAngularJson";
-import { captureConsoleLogs } from "./console-capture";
 import { reverseTranslateFileScope, reverseTranslateFolderScope, reverseTranslateSelectionScope, reverseTranslateSelectedKeysInWorkspace } from './reverse';
 import { extractFromJsTs } from "./extractJsTs";
 import { extractFromHtml } from "./extractHtml";
@@ -1268,6 +1267,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   const disposable = vscode.commands.registerCommand("angularTranslation.extract", async () => {
+    vscode.window.showInformationMessage("v9.1: Running latest I18n fix! If you did not see this before, you were running the old buggy code.");
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) {
       vscode.window.showErrorMessage("Open a workspace folder first.");
@@ -1310,6 +1310,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   const extractFileDisposable = vscode.commands.registerCommand("angularTranslation.extractFile", async (uri?: vscode.Uri) => {
+    vscode.window.showInformationMessage("v9.1: Running latest I18n fix! If you did not see this before, you were running the old buggy code.");
     if (!uri) return;
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) return;
@@ -1541,8 +1542,6 @@ export function activate(context: vscode.ExtensionContext) {
       );
       output.show(true);
 
-      const restoreConsole = captureConsoleLogs(output);
-
       try {
         // Load languages to get baseLocaleCode
         const langs = await loadAndNormalizeLanguages(root, cfg.languagesJsonPath);
@@ -1595,8 +1594,6 @@ export function activate(context: vscode.ExtensionContext) {
           `Reverse translation failed: ${msg}`
         );
         output.appendLine(`[angular-i18n-reverse] Failed ❌ ${msg}`);
-      } finally {
-        restoreConsole();
       }
     }
   );
@@ -1627,7 +1624,6 @@ export function activate(context: vscode.ExtensionContext) {
       );
       output.show(true);
 
-      const restoreConsole = captureConsoleLogs(output);
 
       try {
         // Load languages to get baseLocaleCode
@@ -1681,8 +1677,6 @@ export function activate(context: vscode.ExtensionContext) {
           `Reverse translation failed: ${msg}`
         );
         output.appendLine(`[angular-i18n-reverse] Failed ❌ ${msg}`);
-      } finally {
-        restoreConsole();
       }
     }
   );
@@ -1711,8 +1705,6 @@ export function activate(context: vscode.ExtensionContext) {
         "Angular Translation Reverse"
       );
       output.show(true);
-
-      const restoreConsole = captureConsoleLogs(output);
 
       try {
         // Load languages to get baseLocaleCode
@@ -1761,8 +1753,6 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage(
           `Reverse translation failed: ${msg}`
         );
-      } finally {
-        restoreConsole();
       }
     }
   );

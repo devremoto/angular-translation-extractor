@@ -189,45 +189,7 @@ export function extractFromJsTsContent(
       found.push(...inlineFound);
     },
 
-    CallExpression(path: any) {
-      const node = path.node;
-      const callee = node.callee;
-
-      if (callee.type === "MemberExpression" && callee.property.type === "Identifier" &&
-        ["instant", "get", "stream"].includes(callee.property.name)) {
-
-        // Helper to check expression
-        const checkObj = (obj: any): boolean => {
-          if (obj.type === "MemberExpression" && obj.property.type === "Identifier") {
-            if (/translate/i.test(obj.property.name)) return true; // this.translate
-            return false;
-          }
-          if (obj.type === "Identifier") {
-            if (/translate/i.test(obj.name)) return true; // translate.instant
-            return false;
-          }
-          return false;
-        };
-
-        if (checkObj(callee.object)) {
-          const args = node.arguments;
-          // Only handle simple string literal keys
-          if (args.length > 0 && args[0].type === "StringLiteral") {
-            const key = args[0].value;
-            found.push({
-              fileAbs,
-              fileRelFromSrc,
-              line: node.loc?.start.line ?? 1,
-              column: node.loc?.start.column ?? 0,
-              text: key,
-              rawText: `'${key}'`,
-              kind: "js-string",
-              isAlreadyTranslated: true
-            });
-          }
-        }
-      }
-    },
+    // Removed CallExpression extraction for already translated strings, per user request
 
     // Extract strings from Class code
     StringLiteral(path: any) {

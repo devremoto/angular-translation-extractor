@@ -124,63 +124,7 @@ export function extractFromHtmlContent(
     });
   }
 
-  // Explicitly extract [translate]="'KEY'" or translate="KEY" which are NOT in the standard attribute list
-  const translateAttrRe = /(?:\[(translate)\]|(translate))\s*=\s*("([^"]*)"|'([^']*)')/gms;
-  while ((m = translateAttrRe.exec(maskedHtml))) {
-    // m[1]="translate" (from [translate]), m[2]="translate" (from translate)
-    // m[3]="'KEY'" (double quotes), m[4]="'KEY'" (single quotes)
-    const rawVal = m[3] ?? m[4] ?? "";
-
-    // Check if it looks like a bound string literal: 'KEY'
-    const stringLiteralMatch = rawVal.match(/^\s*(['"])(.*?)\1\s*$/);
-    if (stringLiteralMatch) {
-      const key = stringLiteralMatch[2]; // inner content
-      const rawText = stringLiteralMatch[0]; // 'KEY'
-
-      if (key.length >= 1) { // Accept even 1 char keys
-        const fullMatch = m[0];
-        const quoteChar = m[3] ? '"' : "'";
-        const valueIndex = fullMatch.indexOf(rawVal);
-        const startOffset = m.index + valueIndex;
-
-        const { line, col } = locate(html, startOffset);
-        const adjusted = adjustLocation(line, col, baseLine, baseCol);
-
-        found.push({
-          fileAbs,
-          fileRelFromSrc,
-          line: adjusted.line,
-          column: adjusted.col,
-          text: key,
-          rawText,
-          kind: "html-attr",
-          isAlreadyTranslated: true
-        });
-      }
-    } else {
-      // Literal translate="KEY"
-      // If it doesn't have inner quotes, it might be a literal key for 'translate' attribute (not [translate])
-      if (m[2] === "translate") {
-        const key = rawVal.trim();
-        if (key.length >= 1) {
-          const startOffset = m.index + m[0].indexOf(rawVal);
-          const { line, col } = locate(html, startOffset);
-          const adjusted = adjustLocation(line, col, baseLine, baseCol);
-
-          found.push({
-            fileAbs,
-            fileRelFromSrc,
-            line: adjusted.line,
-            column: adjusted.col,
-            text: key,
-            rawText: rawVal,
-            kind: "html-attr",
-            isAlreadyTranslated: true
-          });
-        }
-      }
-    }
-  }
+  // Removed extraction of existing [translate] and translate attributes per user request.
 
   // Extract strings from {{ }} interpolations (ternary and plain strings without | translate)
   const interpolationRe = /\{\{([^}]+)\}\}/gms;
@@ -188,34 +132,8 @@ export function extractFromHtmlContent(
     const expr = m[1];
     const exprIndex = m.index + 2; // Account for {{
 
-    // Skip if this expression already has | translate, but try to capture the key if possible
+    // Skip if this expression already has | translate completely
     if (/\|\s*translate/.test(expr)) {
-      // Capture simple keys: {{ 'KEY' | translate }}
-      const keyMatch = expr.match(/^\s*(?:'([^']+)'|"([^"]+)")\s*\|\s*translate/);
-      if (keyMatch) {
-        const key = keyMatch[1] || keyMatch[2];
-        const quoteUsed = keyMatch[1] ? "'" : '"';
-
-        // Locate
-        const matchIndexInExpr = expr.indexOf(quoteUsed + key + quoteUsed);
-        // approximate location inside expression
-        if (matchIndexInExpr >= 0) {
-          const startOffset = exprIndex + matchIndexInExpr + 1; // +1 for opening quote
-          const { line, col } = locate(html, startOffset);
-          const adjusted = adjustLocation(line, col, baseLine, baseCol);
-
-          found.push({
-            fileAbs,
-            fileRelFromSrc,
-            line: adjusted.line,
-            column: adjusted.col,
-            text: key,
-            rawText: quoteUsed + key + quoteUsed,
-            kind: "html-interpolation",
-            isAlreadyTranslated: true
-          });
-        }
-      }
       continue;
     }
 
