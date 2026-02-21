@@ -258,12 +258,7 @@ function evaluateAggressiveModeForFunctionArg(
   const contextValue = fnArgContext?.context ?? "";
   const sourceValue = fnArgContext?.callSource ?? "";
 
-  if (/^(?:this\.)?signal\(arg#1\)$/.test(contextValue)) {
-    return {
-      allowed: true,
-      reason: "allowed-by-signal-arg-rule"
-    };
-  }
+
 
   if (
     matchesRegexList(contextRegexList, contextValue)
@@ -290,6 +285,15 @@ function evaluateAggressiveModeForFunctionArg(
   const words = normalized.split(/\s+/).filter(Boolean);
   if (words.length > 1) {
     return { allowed: true, reason: "allowed-by-moderate-mode-multi-word" };
+  }
+
+  // Reject strictly technical-looking identifiers even if they are long
+  if (/^[a-z]+(_[a-z0-9]+)+$/.test(normalized) || // snake_case
+    /^[a-z]+([A-Z][a-z0-9]*)+$/.test(normalized) || // camelCase
+    /^[A-Z][a-z0-9]+([A-Z][a-z0-9]*)+$/.test(normalized) || // PascalCase
+    /^[a-z0-9]+(-[a-z0-9]+)+$/.test(normalized) || // kebab-case
+    /^[A-Za-z0-9]+(\.[A-Za-z0-9]+)+$/.test(normalized)) { // dot.notation
+    return { allowed: false, reason: "restricted by aggressiveMode=moderate (technical identifier format)" };
   }
 
   if (words.length === 1 && words[0].length > 10) {
@@ -432,6 +436,13 @@ function inIgnoredContext(p: any): boolean {
 
   // STRICT RULE: Ignore ALL strings inside @Component decorator except for 'template' property
   // We already handle 'template' property in the separate traversal pass, so we can ignore ALL of them here
+  const callExpr = p.findParent?.((pp: any) => pp.isCallExpression?.());
+  if (callExpr) {
+    const callee = callExpr.node.callee;
+    if (callee?.type === "MemberExpression" && callee.object?.type === "Identifier" && callee.object.name === "console") {
+      return true;
+    }
+  }
   const decorator = p.findParent?.((pp: any) => pp.isDecorator?.());
   if (decorator) {
     const expr = decorator.node.expression;
@@ -450,6 +461,18 @@ function inIgnoredContext(p: any): boolean {
 
   if (p.parentPath?.isImportDeclaration?.() || p.parentPath?.isExportNamedDeclaration?.() || p.parentPath?.isExportAllDeclaration?.()) return true;
   if (p.parentPath?.isImportExpression?.() || p.parentPath?.isTSImportType?.()) return true;
+
+  // Ignore anything inside TypeScript types (TSLiteralType, TSTypeAnnotation, TSPropertySignature, etc.)
+  const tsTypeParent = p.findParent?.((pp: any) =>
+    pp.type === "TSTypeAnnotation" ||
+    pp.type === "TSLiteralType" ||
+    pp.type === "TSPropertySignature" ||
+    pp.type === "TSInterfaceDeclaration" ||
+    pp.type === "TSTypeAliasDeclaration"
+  );
+  if (tsTypeParent) {
+    return true;
+  }
   if (p.key === "source" && (parent?.type === "ImportDeclaration" || parent?.type === "ExportAllDeclaration" || parent?.type === "ExportNamedDeclaration")) {
     return true;
   }
