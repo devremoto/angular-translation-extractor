@@ -1267,7 +1267,6 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   const disposable = vscode.commands.registerCommand("angularTranslation.extract", async () => {
-    vscode.window.showInformationMessage("v9.1: Running latest I18n fix! If you did not see this before, you were running the old buggy code.");
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) {
       vscode.window.showErrorMessage("Open a workspace folder first.");
@@ -1310,7 +1309,6 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   const extractFileDisposable = vscode.commands.registerCommand("angularTranslation.extractFile", async (uri?: vscode.Uri) => {
-    vscode.window.showInformationMessage("v9.1: Running latest I18n fix! If you did not see this before, you were running the old buggy code.");
     if (!uri) return;
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) return;

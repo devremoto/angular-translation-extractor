@@ -310,7 +310,7 @@
             "high"
           ],
           "default": "moderate",
-          "description": "Controls extraction aggressiveness for strings inside function parameters. low: blocks all; moderate: allows multi-word or single-word > 10 chars; high: allows all with no length limit. Restricted strings are reported in src/translate/aggressive-mode-restricted.json."
+          "description": "Controls extraction aggressiveness for strings inside function parameters. low: blocks all; moderate: allows multi-word; high: allows all with no length limit. Restricted strings are reported in src/translate/aggressive-mode-restricted.json."
         },
         "i18nExtractor.aggressiveModeAllowCallRegex": {
           "type": "array",

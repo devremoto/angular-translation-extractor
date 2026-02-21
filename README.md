@@ -2,7 +2,7 @@
 ![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/AdilsondeAlmeidaPedro.angular-translation-extractor?style=flat-square)
 ![Visual Studio Marketplace Rating](https://img.shields.io/visual-studio-marketplace/r/AdilsondeAlmeidaPedro.angular-translation-extractor?style=flat-square)
 
---------------
+---
 
 A VS Code extension that automatically extracts hard-coded user-facing strings from your Angular source code, generates organized i18n JSON files with support for multiple locales, and automatically replaces strings in your source code with translation keys.
 
@@ -544,7 +544,7 @@ Access settings via: **File → Preferences → Settings** (or `Ctrl+,`) → Sea
 | `i18nExtractor.srcDir`                          | `"src"`                                                                                      | Folder to scan for source files (relative to workspace root)                                                                                                         |
 | `i18nExtractor.outputRoot`                      | `"src/assets/I18n"`                                                                          | Output root for generated locale JSONs                                                                                                                               |
 | `i18nExtractor.languagesJsonPath`               | `"src/app/core/json/language-code.json"`                                                     | Path to languages list JSON file                                                                                                                                     |
-| `i18nExtractor.aggressiveMode`                  | `"moderate"`                                                                                 | Function-parameter extraction mode: `"low"` blocks all, `"moderate"` allows multi-word or single-word > 10 chars, `"high"` allows all                                |
+| `i18nExtractor.aggressiveMode`                  | `"moderate"`                                                                                 | Function-parameter extraction mode: `"low"` blocks all, `"moderate"` allows multi-word, `"high"` allows all                                                          |
 | `i18nExtractor.aggressiveModeAllowCallRegex`    | `[^alert\\s*\\(, ^confirm\\s*\\(, ^prompt\\s*\\(]`                                           | Regex allowlist matched against full call source (example: `alert('teste')`). Matches have priority over `aggressiveMode`                                            |
 | `i18nExtractor.aggressiveModeAllowContextRegex` | `[^window\\.alert\\(arg#1\\)$, ^window\\.confirm\\(arg#1\\)$, ^window\\.prompt\\(arg#1\\)$]` | Regex allowlist matched against function argument context (example: `this.toastr.error(arg#1)`). Matches have priority over `aggressiveMode`                         |
 | `i18nExtractor.minStringLength`                 | `2`                                                                                          | Ignore strings shorter than this length                                                                                                                              |

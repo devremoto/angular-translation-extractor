@@ -86,6 +86,8 @@ export function extractFromJsTsContent(
     kind: LiteralKind,
     shouldSkipComplexTemplates: boolean
   ) {
+    if (!text || typeof text !== "string") return;
+    if (text.trim().length === 0) return;
     if (processedTemplateNodes.has(path.node)) return;
     if (shouldSkipComplexTemplates && path.node.expressions.length > 0) return;
     if (inIgnoredContext(path)) return;
@@ -254,17 +256,18 @@ function evaluateAggressiveModeForFunctionArg(
     /^[a-z]+([A-Z][a-z0-9]*)+$/.test(normalized) || // camelCase
     /^[A-Z][a-z0-9]+([A-Z][a-z0-9]*)+$/.test(normalized) || // PascalCase
     /^[a-z0-9]+(-[a-z0-9]+)+$/.test(normalized) || // kebab-case
-    /^[A-Za-z0-9]+(\.[A-Za-z0-9]+)+$/.test(normalized)) { // dot.notation
+    /^[A-Za-z0-9]+(\.[A-Za-z0-9]+)+$/.test(normalized) ||
+    //if contains [ or ] or { or } or ( or ) anywhere in the normalized string, it's likely a technical string, not user-facing
+    /[[\]{}()<>]/.test(normalized)
+  ) { // dot.notation
+
     return { allowed: false, reason: "restricted by aggressiveMode=moderate (technical identifier format)" };
   }
 
-  if (words.length === 1 && words[0].length > 10) {
-    return { allowed: true, reason: "allowed-by-moderate-mode-single-word-length>10" };
-  }
 
   return {
     allowed: false,
-    reason: "restricted by aggressiveMode=moderate (requires multi-word or single-word > 10 chars in function parameters)"
+    reason: "restricted by aggressiveMode=moderate (requires multi-word in function parameters)"
   };
 }
 
@@ -376,12 +379,14 @@ function isProbablyUserFacing(s: string, minLen: number): boolean {
   if (/^[\d\s]+$/.test(t)) return false;
   if (/^[\p{P}\p{S}\s]+$/u.test(t)) return false;
   if (/^(https?:\/\/|\/|#)/.test(t)) return false;
-
+  if (/^(http?:\/\/|\/|#)/.test(t)) return false;
   if (/^[A-Z0-9_.-]{8,}$/.test(t)) return false;
   if (/^[a-f0-9]{8,}$/i.test(t)) return false;
   if (/\{\{[\s\S]*?\}\}|\$\{[\s\S]*?\}/.test(t)) return false;
+  if (/^\/\/+[\s\S]*$/.test(t)) return false;
 
   // Skip strings that look like CSS selectors (e.g. link[rel="stylesheet"], div.container)
+  //if (/[[\]{}()<>]/.test(t)) return false;
   if (/^[a-zA-Z0-9\-_]+\[[a-zA-Z0-9\-_]+=["'][^"']+["']\]$/.test(t)) return false;
 
   // Skip strings containing any HTML tags (e.g. <div style="...">...</div>)
