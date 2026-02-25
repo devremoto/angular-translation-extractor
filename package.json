@@ -172,6 +172,10 @@
           "command": "angularTranslation.excludeWorkspacePath",
           "group": "3_utils",
           "when": "resourceScheme == file"
+        },
+        {
+          "command": "angularTranslation.clearWorkspaceState",
+          "group": "3_utils"
         }
       ]
     },

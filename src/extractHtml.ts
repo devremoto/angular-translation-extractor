@@ -29,10 +29,25 @@ export function extractFromHtmlContent(
     return open + content.replace(/[^\n]/g, " ") + closeTag;
   });
 
-  const textRe = />((?:(?!<).)+)</gms;
-  let m: RegExpExecArray | null;
-  while ((m = textRe.exec(maskedHtml))) {
-    const rawContent = m[1];
+  const tagRe = /<(?:\/|[a-zA-Z]|!)(?:[^<>"']|"[^"]*"|'[^']*')*>/g;
+  let lastIndex = 0;
+  const textMatches: { content: string; offset: number }[] = [];
+
+  let tagMatch: RegExpExecArray | null;
+  while ((tagMatch = tagRe.exec(maskedHtml))) {
+    const rawContent = maskedHtml.substring(lastIndex, tagMatch.index);
+    if (rawContent.trim().length > 0) {
+      textMatches.push({ content: rawContent, offset: lastIndex });
+    }
+    lastIndex = tagRe.lastIndex;
+  }
+  const remainingContent = maskedHtml.substring(lastIndex);
+  if (remainingContent.trim().length > 0) {
+    textMatches.push({ content: remainingContent, offset: lastIndex });
+  }
+
+  for (const textMatch of textMatches) {
+    const rawContent = textMatch.content;
 
     // Split by interpolation {{...}} to extract mix of static text and dynamic content separately
     // e.g. "Hello, {{ name }}" -> parts: ["Hello, ", (gap), ""]
@@ -40,25 +55,25 @@ export function extractFromHtmlContent(
 
     // Only split if we actually see start of interpolation
     if (rawContent.includes('{{')) {
-      let lastIndex = 0;
+      let partLastIndex = 0;
       const interpolationRe = /\{\{[\s\S]*?\}\}/g;
       let interpMatch;
 
       while ((interpMatch = interpolationRe.exec(rawContent)) !== null) {
         // Text before interpolation
-        if (interpMatch.index > lastIndex) {
+        if (interpMatch.index > partLastIndex) {
           parts.push({
-            content: rawContent.substring(lastIndex, interpMatch.index),
-            offset: lastIndex
+            content: rawContent.substring(partLastIndex, interpMatch.index),
+            offset: partLastIndex
           });
         }
-        lastIndex = interpMatch.index + interpMatch[0].length;
+        partLastIndex = interpMatch.index + interpMatch[0].length;
       }
       // Text after last interpolation
-      if (lastIndex < rawContent.length) {
+      if (partLastIndex < rawContent.length) {
         parts.push({
-          content: rawContent.substring(lastIndex),
-          offset: lastIndex
+          content: rawContent.substring(partLastIndex),
+          offset: partLastIndex
         });
       }
     } else {
@@ -75,7 +90,7 @@ export function extractFromHtmlContent(
       const rawText = part.content.trim();
 
       // Calculate offset
-      const startOffset = m.index + 1 + part.offset + leadingWsLen;
+      const startOffset = textMatch.offset + part.offset + leadingWsLen;
 
       // Use original HTML for location to be safe
       const { line, col } = locate(html, startOffset);
@@ -92,6 +107,7 @@ export function extractFromHtmlContent(
     }
   }
 
+  let m: RegExpExecArray | null;
   const attrRe = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*("([^"]*)"|'([^']*)')/gms;
   while ((m = attrRe.exec(maskedHtml))) {
     const attrName = (m[1] || "").toLowerCase();
