@@ -5,7 +5,7 @@ import * as fsSync from "node:fs"; // For sync checks if needed
 import { createRequire } from "node:module";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { getConfig, ExtConfig } from "./config";
+import { ExtConfig, ResolvedProject, clearProjectCache, resolveProject } from "./config";
 
 const execAsync = promisify(exec);
 import { scanForStrings } from "./scan";
@@ -19,9 +19,8 @@ import { updateMainTs } from "./updateMainTs";
 import { runTranslateCommand } from "./translate";
 import { updateAngularJson } from "./updateAngularJson";
 import { reverseTranslateFileScope, reverseTranslateFolderScope, reverseTranslateSelectionScope, reverseTranslateSelectedKeysInWorkspace } from './reverse';
-import { extractFromJsTs } from "./extractJsTs";
+import { extractFromJsTs, findInlineTemplateRanges } from "./extractJsTs";
 import { extractFromHtml } from "./extractHtml";
-import { Project, SyntaxKind } from "ts-morph";
 
 
 
@@ -1050,16 +1049,35 @@ async function processLocalesAndArtifacts(
   return { gen, replaceResult, generatedLangs, baseLocaleCode, langs };
 }
 
+/**
+ * `resolveProject` throws when the trigger is not inside (or above) an Angular project.
+ * Commands surface that as a plain message instead of a generic "command failed".
+ */
+function tryResolveProject(triggerPath: string): ResolvedProject | null {
+  try {
+    return resolveProject(triggerPath);
+  } catch (err) {
+    vscode.window.showErrorMessage((err as Error)?.message ?? String(err));
+    return null;
+  }
+}
+
 async function runExtractionPipeline(
   context: vscode.ExtensionContext,
-  folder: vscode.WorkspaceFolder,
+  triggerPath: string,
   action: (root: string, cfg: ExtConfig, output: vscode.OutputChannel) => Promise<{ found: FoundString[]; restricted: RestrictedString[] }>,
   options: ProcessOptions = {}
 ) {
-  const root = folder.uri.fsPath;
-  const cfg = getConfig();
+  const project = tryResolveProject(triggerPath);
+  if (!project) {
+    return null;
+  }
+  const { root, cfg } = project;
   const output = vscode.window.createOutputChannel("Angular Translation Extractor");
   output.show(true);
+
+  output.appendLine(`[angular-i18n] Angular project: ${root}`);
+  output.appendLine(`[angular-i18n] Source folder: ${cfg.srcDir} · locales: ${cfg.outputRoot}`);
 
   const normalizeGlob = (value: string) => (value || "").replace(/\\+/g, "/").replace(/^\.\//, "");
   const normalizedSrcDir = normalizeGlob(cfg.srcDir).replace(/\/+$/, "");
@@ -1199,13 +1217,42 @@ async function executeAutoTranslate(
   output.appendLine(`[auto-translate] Completed.`);
 }
 
+/**
+ * The Angular CLI is a project dev-dependency, not necessarily on PATH — a bare `ng` fails with
+ * "'ng' is not recognized". Prefer the project's own binary, then npm/npx, then skip.
+ */
+function resolveNgCommand(root: string): { command: string; args: string[] } | null {
+  const binDir = path.join(root, "node_modules", ".bin");
+  const localBin = process.platform === "win32"
+    ? [path.join(binDir, "ng.cmd"), path.join(binDir, "ng.exe")]
+    : [path.join(binDir, "ng")];
+  for (const candidate of localBin) {
+    if (fsSync.existsSync(candidate)) {
+      return { command: `"${candidate}"`, args: ["build"] };
+    }
+  }
+
+  // The CLI package may be present without a .bin shim (pnpm, hoisting quirks) — run it via npx.
+  if (fsSync.existsSync(path.join(root, "node_modules", "@angular", "cli"))) {
+    return { command: "npx", args: ["--no-install", "ng", "build"] };
+  }
+
+  return null;
+}
+
 async function runNgBuild(root: string, output: vscode.OutputChannel) {
-  output.appendLine(`[angular-i18n] Running ng build...`);
+  const ng = resolveNgCommand(root);
+  if (!ng) {
+    output.appendLine(`[angular-i18n] Skipping ng build — Angular CLI not found in ${path.join(root, "node_modules")}.`);
+    return;
+  }
+
+  output.appendLine(`[angular-i18n] Running ${ng.command} ${ng.args.join(" ")}...`);
   try {
     const buildCode = await runTranslateCommand({
       cwd: root,
-      command: "ng",
-      args: ["build"],
+      command: ng.command,
+      args: ng.args,
       onStdout: s => output.append(s),
       onStderr: s => output.append(s)
     });
@@ -1235,8 +1282,7 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const cfg = getConfig();
-      const root = folders[0].uri.fsPath;
+      const { root, cfg } = resolveProject(currentEditor.document.uri.fsPath);
       const defaultLocaleCode = await getDefaultLocaleCodeFromLanguagesFile(root, cfg.languagesJsonPath);
       if (!defaultLocaleCode) {
         await vscode.commands.executeCommand("setContext", "angularTranslation.isDefaultLocaleJsonEditor", false);
@@ -1254,7 +1300,10 @@ export function activate(context: vscode.ExtensionContext) {
     }
   };
 
-  void updatePruneSelectedKeysContext();
+  // Deferred: project resolution touches the disk, and activate() must return immediately
+  // or the extension host start times out.
+  const initialContextTimer = setTimeout(() => void updatePruneSelectedKeysContext(), 0);
+  context.subscriptions.push({ dispose: () => clearTimeout(initialContextTimer) });
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       void updatePruneSelectedKeysContext(editor);
@@ -1263,6 +1312,13 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(() => {
       void updatePruneSelectedKeysContext();
+    })
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("i18nExtractor")) {
+        clearProjectCache();
+      }
     })
   );
 
@@ -1281,15 +1337,24 @@ export function activate(context: vscode.ExtensionContext) {
         || path.extname(activeFileName).toLowerCase() === ".json";
 
       if (isJsonEditor) {
-        const root = folders[0].uri.fsPath;
-        const cfg = getConfig();
-        const defaultLocaleCode = await getDefaultLocaleCodeFromLanguagesFile(root, cfg.languagesJsonPath);
+        const project = tryResolveProject(activeFile);
+        if (!project) {
+          return;
+        }
+        const { root, cfg } = project;
 
-        if (defaultLocaleCode) {
-          const expectedDefaultFileName = `${defaultLocaleCode}.json`;
-          if (activeFileName !== expectedDefaultFileName) {
+        // Only guard when the focused JSON is a NON-default locale file inside outputRoot —
+        // extracting "from" pt-BR.json is a likely mistake. Any other JSON (language-code.json,
+        // package.json, settings…) is irrelevant to the scan; do not block the command over it.
+        const outputAbs = path.join(root, cfg.outputRoot);
+        const relToLocales = path.relative(outputAbs, activeFile);
+        const isLocaleFile = relToLocales.length > 0 && !relToLocales.startsWith("..") && !path.isAbsolute(relToLocales);
+
+        if (isLocaleFile) {
+          const defaultLocaleCode = await getDefaultLocaleCodeFromLanguagesFile(root, cfg.languagesJsonPath);
+          if (defaultLocaleCode && activeFileName !== `${defaultLocaleCode}.json`) {
             vscode.window.showErrorMessage(
-              `Extract translations (All app) can only be triggered from the default locale JSON file (${expectedDefaultFileName}) when launched from a JSON editor.`
+              `Extract translations (All app) cannot run from ${activeFileName} — switch to the default locale file (${defaultLocaleCode}.json) or any source file first.`
             );
             return;
           }
@@ -1297,7 +1362,8 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
-    await runExtractionPipeline(context, folders[0], async (root, cfg, output) => {
+    const triggerPath = vscode.window.activeTextEditor?.document.uri.fsPath ?? folders[0].uri.fsPath;
+    await runExtractionPipeline(context, triggerPath, async (root, cfg, output) => {
       output.appendLine(`[angular-i18n] Scanning ${cfg.srcDir}/ (js/ts/html)...`);
       const { found, restricted } = await scanForStrings({ workspaceRoot: root, cfg });
       output.appendLine(`[angular-i18n] Found ${found.length} candidate strings.`);
@@ -1313,7 +1379,7 @@ export function activate(context: vscode.ExtensionContext) {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders?.length) return;
 
-    await runExtractionPipeline(context, folders[0], async (root, cfg, output) => {
+    await runExtractionPipeline(context, uri.fsPath, async (root, cfg, output) => {
       const fileAbs = uri.fsPath;
       const srcAbs = path.join(root, cfg.srcDir);
       const relFromSrc = posixRel(srcAbs, fileAbs);
@@ -1397,47 +1463,28 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     let kind = ext === ".html" ? "html-text" : "js-string";
-    // Check for inline template in TS files using ts-morph
+    // A selection inside a @Component inline template is HTML, not a JS string.
     if (ext === ".ts" || ext === ".js") {
       const selectionStart = editor.document.offsetAt(selection.start);
       try {
-        const project = new Project({ useInMemoryFileSystem: true });
-        const sourceFile = project.createSourceFile("temp.ts", docText);
-        const componentClass = sourceFile.getClasses().find(c => c.getDecorator("Component"));
-
-        let componentDecoratorObject: any;
-        if (componentClass) {
-          const decorator = componentClass.getDecorator("Component");
-          const args = decorator?.getArguments();
-          if (args && args.length > 0 && args[0].getKind() === SyntaxKind.ObjectLiteralExpression) {
-            componentDecoratorObject = args[0];
-          }
-        }
-
-        if (componentDecoratorObject) {
-          const templateProp = componentDecoratorObject.getProperty("template");
-          if (templateProp?.getKind() === SyntaxKind.PropertyAssignment) {
-            const init = templateProp.asKind(SyntaxKind.PropertyAssignment)?.getInitializer();
-            if (init) {
-              const iStart = init.getStart();
-              const iEnd = init.getEnd();
-              if (selectionStart >= iStart && selectionStart < iEnd) {
-                const k = init.getKind();
-                if ([SyntaxKind.StringLiteral, SyntaxKind.NoSubstitutionTemplateLiteral, SyntaxKind.TemplateExpression].includes(k)) {
-                  kind = "html-text";
-                }
-              }
-            }
-          }
+        const inTemplate = findInlineTemplateRanges(docText)
+          .some(r => selectionStart >= r.start && selectionStart < r.end);
+        if (inTemplate) {
+          kind = "html-text";
         }
       } catch (e) {
-        console.warn("ts-morph check failed:", e);
+        console.warn("inline template check failed:", e);
       }
+    }
+
+    const selectionProject = tryResolveProject(fileAbs);
+    if (!selectionProject) {
+      return;
     }
 
     const found: FoundString = {
       fileAbs,
-      fileRelFromSrc: posixRel(path.join(folders[0].uri.fsPath, getConfig().srcDir), fileAbs),
+      fileRelFromSrc: posixRel(selectionProject.srcAbs, fileAbs),
       kind: kind as "html-text" | "js-string",
       line: range.start.line + 1,
       column: range.start.character,
@@ -1445,7 +1492,7 @@ export function activate(context: vscode.ExtensionContext) {
       rawText: rawText
     };
 
-    const result = await runExtractionPipeline(context, folders[0], async () => ({ found: [found], restricted: [] }), {
+    const result = await runExtractionPipeline(context, fileAbs, async () => ({ found: [found], restricted: [] }), {
       skipReplacement: true,
       forceUpdateMode: "merge"
     });
@@ -1531,8 +1578,11 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const root = folders[0].uri.fsPath;
-      const cfg = getConfig();
+      const project = tryResolveProject(folderUri?.fsPath ?? folders[0].uri.fsPath);
+      if (!project) {
+        return;
+      }
+      const { root, cfg } = project;
       const folderPath = folderUri?.fsPath || root;
 
       const output = vscode.window.createOutputChannel(
@@ -1608,8 +1658,11 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const root = folders[0].uri.fsPath;
-      const cfg = getConfig();
+      const project = tryResolveProject(fileUri?.fsPath ?? folders[0].uri.fsPath);
+      if (!project) {
+        return;
+      }
+      const { root, cfg } = project;
       const filePath = fileUri?.fsPath;
 
       if (!filePath) {
@@ -1694,9 +1747,12 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const root = folders[0].uri.fsPath;
-      const cfg = getConfig();
       const filePath = editor.document.uri.fsPath;
+      const project = tryResolveProject(filePath);
+      if (!project) {
+        return;
+      }
+      const { root, cfg } = project;
       const selection = editor.selection;
 
       const output = vscode.window.createOutputChannel(
@@ -1766,8 +1822,6 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const root = folders[0].uri.fsPath;
-      const cfg = getConfig();
       const output = vscode.window.createOutputChannel("Angular Translation Extractor");
       output.show(true);
 
@@ -1776,6 +1830,12 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage("Open the default JSON file and select properties to prune.");
         return;
       }
+
+      const project = tryResolveProject(editor.document.uri.fsPath);
+      if (!project) {
+        return;
+      }
+      const { root, cfg } = project;
 
       if (editor.selection.isEmpty) {
         vscode.window.showErrorMessage("Select a JSON text range with properties to prune.");
@@ -1897,7 +1957,6 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       const workspaceFolder = folders[0];
-      const root = workspaceFolder.uri.fsPath;
 
       const targetPath = uri?.fsPath ?? vscode.window.activeTextEditor?.document.uri.fsPath;
       if (!targetPath) {
@@ -1905,7 +1964,12 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const normalizedRoot = path.resolve(root);
+      const project = tryResolveProject(targetPath);
+      if (!project) {
+        return;
+      }
+
+      const normalizedRoot = path.resolve(project.root);
       const normalizedTarget = path.resolve(targetPath);
       const rel = path.relative(normalizedRoot, normalizedTarget);
 
@@ -1994,7 +2058,6 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       const workspaceFolder = uri ? vscode.workspace.getWorkspaceFolder(uri) ?? folders[0] : folders[0];
-      const _root = workspaceFolder.uri.fsPath;
 
       const stateKeys = context.workspaceState.keys();
 

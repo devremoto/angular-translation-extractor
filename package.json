@@ -182,21 +182,6 @@
     "configuration": {
       "title": "Angular Translation Extractor",
       "properties": {
-        "i18nExtractor.srcDir": {
-          "type": "string",
-          "default": "src",
-          "description": "Folder to scan (relative to workspace root)."
-        },
-        "i18nExtractor.outputRoot": {
-          "type": "string",
-          "default": "src/assets/i18n",
-          "description": "Output root folder (relative to workspace root). Folder structure from srcDir will be replicated inside."
-        },
-        "i18nExtractor.languagesJsonPath": {
-          "type": "string",
-          "default": "src/app/core/json/language-code.json",
-          "description": "Path to JSON containing array of locales to generate. Missing englishName/nativeName/flag will be auto-filled. The language marked with 'default': true will be used as the base locale."
-        },
         "i18nExtractor.minStringLength": {
           "type": "number",
           "default": 2,
@@ -236,11 +221,6 @@
             "type": "string"
           },
           "description": "HTML attribute names to extract string values from."
-        },
-        "i18nExtractor.mainTsPath": {
-          "type": "string",
-          "default": "{srcDir}/main.ts",
-          "description": "Path to Angular main.ts. You can use {srcDir} as a placeholder."
         },
         "i18nExtractor.angularBootstrapStyle": {
           "type": "string",
@@ -381,7 +361,6 @@
     "@babel/traverse": "^7.24.0",
     "axios": "^1.7.9",
     "fast-glob": "^3.3.2",
-    "punycode": "^2.3.1",
-    "ts-morph": "^27.0.2"
+    "punycode": "^2.3.1"
   }
 }

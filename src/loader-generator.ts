@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { LanguageEntry } from "./types";
-import { ensureDir } from "./utils";
+import { ensureDir, toServedPath } from "./utils";
 
 export async function generateLoaderArtifacts(opts: {
   workspaceRoot: string;
@@ -22,8 +22,9 @@ export async function generateLoaderArtifacts(opts: {
 
   const _outputRootAbs = path.join(workspaceRoot, outputRoot);
 
-  // Convert outputRoot to relative path for use in loader (e.g., "src/assets/I18n" -> "./assets/I18n/")
-  const outputRootRelative = `./${outputRoot.replace(/^src\//, "")}/`.replace(/\/\/+/g, "/");
+  // Web path the locales are served from — outputRoot relative to the source folder
+  // (e.g. "projects/app/src" + "projects/app/src/assets/i18n" -> "./assets/i18n/").
+  const outputRootRelative = toServedPath(srcDir, outputRoot);
 
   const loaderPath = path.join(translateDirAbs, "tg-translate-loader.ts");
   const readmePath = path.join(translateDirAbs, "readme.md");
@@ -124,13 +125,14 @@ Key settings:
 
 ## Configuration Settings
 
-You can configure the extension through VS Code settings (\`settings.json\`) or the Settings UI:
+Paths are **not configurable** — they are detected from your \`angular.json\`: the source folder is the
+project's \`sourceRoot\`, locales are written to \`<sourceRoot>/assets/i18n\`, the languages list is
+\`<sourceRoot>/app/core/json/language-code.json\`, and the bootstrap file comes from the build target.
+
+The remaining behaviour can be configured through VS Code settings (\`settings.json\`) or the Settings UI:
 
 | Setting ID | Description | Default |
 |------------|-------------|---------|
-| \`i18nExtractor.srcDir\` | Source folder to scan | \`src\` |
-| \`i18nExtractor.outputRoot\` | Output folder for translations | \`src/assets/i18n\` |
-| \`i18nExtractor.languagesJsonPath\` | Path to your languages JSON file | \`src/app/core/json/language-code.json\` |
 | \`default: true\` in language JSON | Base/default source language | Required on one language entry |
 | \`i18nExtractor.aggressiveMode\` | Function-parameter extraction mode: \`low\`, \`moderate\`, \`high\` | \`moderate\` |
 | \`i18nExtractor.aggressiveModeAllowCallRegex\` | Regex allowlist matched against full call source (priority over \`aggressiveMode\`) | \`["^alert\\\\s*\\\\(", "^confirm\\\\s*\\\\(", "^prompt\\\\s*\\\\("]\` |
@@ -139,7 +141,6 @@ You can configure the extension through VS Code settings (\`settings.json\`) or 
 | \`i18nExtractor.ignoreGlobs\` | Glob patterns to ignore | \`["**/*.test.*", "**/*.spec.*", "**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**", "**/.angular/**", "**/app.html", "**/index.html", "**/assets/**", "**/environments/**", "**/.agent/**", "**/.vscode/**"]\` |
 | \`i18nExtractor.skipGlobs\` | Additional glob patterns to skip | \`[]\` |
 | \`i18nExtractor.htmlAttributeNames\` | HTML attributes to extract | \`["title", "alt", "placeholder", "aria-label", "aria-placeholder"]\` |
-| \`i18nExtractor.mainTsPath\` | Path to \`main.ts\` | \`{srcDir}/main.ts\` |
 | \`i18nExtractor.angularBootstrapStyle\` | \`standalone\` or \`module\` | \`standalone\` |
 | \`i18nExtractor.updateMode\` | Source source updates: \`merge\`, \`overwrite\`, \`recreate\` | \`merge\` |
 | \`i18nExtractor.autoTranslate\` | Automatically translate keys | \`true\` |
@@ -151,7 +152,7 @@ You can configure the extension through VS Code settings (\`settings.json\`) or 
 
 ### Language Configuration File
 
-The \`languagesJsonPath\` file defines your supported languages:
+The \`<sourceRoot>/app/core/json/language-code.json\` file defines your supported languages:
 
 \`\`\`json
 [
@@ -439,8 +440,9 @@ Access settings via: **File → Preferences → Settings** → Search for "Angul
 Key settings:
 - \`i18nExtractor.autoTranslate\` - Automatically translate to target languages (default: \`true\`)
 - \`i18nExtractor.autoTranslateDefaultLanguage\` - Translate the default language (default: \`false\`)
-- \`i18nExtractor.outputRoot\` - Where to generate JSON files (default: \`"src/assets/i18n"\`)
 - \`i18nExtractor.googleTranslateDelay\` - Delay between translation requests in milliseconds (default: \`500\`)
+
+JSON files are always generated under \`${outputRoot}\` — detected from your \`angular.json\`, not configured.
 
 
 
@@ -472,7 +474,7 @@ Run the command: **Extract translations (All app)** from the VS Code Command Pal
   const selectorStylePath = path.join(translateDirAbs, "tg-language-selector.component.css");
 
   // Determine runtime URL for languages JSON
-  let languagesJsonUrl = 'assets/i18n-languages.json';
+  let languagesJsonUrl = 'app/core/json/language-code.json';
   if (languagesJsonPath) {
     // We try to make it relative to srcDir, assuming srcDir is the web root (or effectively so for assets)
     // If srcDir is "src", and languagesJsonPath is "src/assets/foo.json", result is "assets/foo.json"
@@ -482,8 +484,17 @@ Run the command: **Extract translations (All app)** from the VS Code Command Pal
     }
   }
 
-  const selectorComponent = getTgLanguageSelectorComponent(languagesJsonUrl);
-  const selectorTemplate = getLanguageSelectorTemplate();
+  // Emit the signal / new-control-flow (@if, @for) variant only for Angular 17+.
+  // Older projects (or when the version can't be detected) get the universally
+  // compatible *ngIf / @Input variant.
+  const angularMajor = await detectAngularMajor(workspaceRoot);
+  const useModernSyntax = angularMajor >= 17;
+  const selectorComponent = useModernSyntax
+    ? getTgLanguageSelectorComponent(languagesJsonUrl)
+    : getTgLanguageSelectorComponentLegacy(languagesJsonUrl);
+  const selectorTemplate = useModernSyntax
+    ? getLanguageSelectorTemplate()
+    : getLanguageSelectorTemplateLegacy();
   const selectorStyle = getLanguageSelectorStyle();
 
 
@@ -515,7 +526,7 @@ function getTgLanguageSelectorComponent(languagesJsonUrl: string): string {
  * This file is auto-generated by the Angular Translation Extractor extension.
  * Any manual changes to this file may be lost when the extension runs again.
  */
-import { Component, input, OnInit } from '@angular/core';
+import { Component, ElementRef, HostListener, input, OnInit, signal, viewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TranslateService } from '@ngx-translate/core';
 import { HttpClient } from '@angular/common/http';
@@ -535,22 +546,36 @@ export interface TgLanguage {
   standalone: true,
   imports: [CommonModule],
   templateUrl: './tg-language-selector.component.html',
-  styleUrls: ['./tg-language-selector.component.css'],
-  host: {
-    '[class.white-mode]': 'mode() === "white"',
-    '[class.dark-mode]': 'mode() === "dark"'
-  }
+  styleUrls: ['./tg-language-selector.component.css']
 })
 export class TgLanguageSelectorComponent implements OnInit {
   mode = input<'white' | 'dark'>('white');
-  languages: TgLanguage[] = [];
-  currentLanguage: TgLanguage | null = null;
-  isOpen = false;
+  /** Vertical open direction. 'auto' flips upward when there is not enough room below. */
+  direction = input<'auto' | 'up' | 'down'>('auto');
+  /** Horizontal alignment. 'auto' anchors to the right edge when a left-anchored menu would overflow. */
+  align = input<'auto' | 'left' | 'right'>('auto');
+  /** Stacking context for the selector — raise it above overlays, sticky footers, etc. */
+  zIndex = input<number | string>(1000);
+  /** Class applied to the root when in white / dark mode — override to match your design system. */
+  whiteModeClass = input<string>('white-mode');
+  darkModeClass = input<string>('dark-mode');
+  /** True when the dropdown should open upward (computed from direction / viewport space). */
+  readonly dropUp = signal(false);
+  /** True when the dropdown should anchor to its right edge (computed from align / viewport space). */
+  readonly alignRight = signal(false);
+  /** Kept in sync with the dropdown's CSS max-height so the flip decision is accurate. */
+  private readonly dropdownMaxHeightPx = 320;
+  /** Approximate dropdown width used to decide horizontal overflow. */
+  private readonly dropdownMinWidthPx = 160;
+  readonly languages = signal<TgLanguage[]>([]);
+  readonly currentLanguage = signal<TgLanguage | null>(null);
+  readonly isOpen = signal(false);
+  readonly rootRef = viewChild<ElementRef<HTMLElement>>('root');
 
   constructor(
     private translateService: TranslateService,
     private http: HttpClient
-  ) {}
+  ) { }
 
   ngOnInit(): void {
 
@@ -565,15 +590,274 @@ export class TgLanguageSelectorComponent implements OnInit {
     this.http.get<TgLanguage[]>('${languagesJsonUrl}')
       .subscribe({
         next: (langs) => {
-          this.languages = langs.filter(l => l.active !== false);
-          this.languages.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+          const activeLanguages = langs
+            .filter(l => l.active !== false)
+            .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+          this.languages.set(activeLanguages);
 
-          var defaultLang = this.languages.find(l => l.default) || this.languages[0];
+          const currentLanguages = this.languages();
+          const defaultLang = currentLanguages.find(l => l.default) || currentLanguages[0];
           if (defaultLang) {
             this.translateService.setDefaultLang(defaultLang.code);
             this.translateService.use(defaultLang.code);
           }
-          
+
+          const currentLang = this.translateService.currentLang || this.translateService.defaultLang;
+          if (currentLang) {
+            this.currentLanguage.set(currentLanguages.find(l => l.code === currentLang) || currentLanguages[0] || null);
+          } else if (currentLanguages.length > 0) {
+            this.currentLanguage.set(currentLanguages[0]);
+          }
+          sessionStorage.setItem('languages', JSON.stringify(currentLanguages));
+        },
+        error: (err) => {
+          // Fallback or error handling
+          if (!this.currentLanguage() && this.languages().length > 0) {
+            this.currentLanguage.set(this.languages()[0]);
+          }
+          console.error('Failed to load languages from ${languagesJsonUrl}', err);
+        }
+      });
+  }
+
+  getLanguagesFromSession() {
+    const savedLangCode = sessionStorage.getItem('selectedLanguage');
+    const savedLanguages = sessionStorage.getItem('languages');
+    if (savedLanguages) {
+      var defaultLang = JSON.parse(savedLanguages).find((l: TgLanguage) => l.default) || JSON.parse(savedLanguages)[0];
+      if (defaultLang) {
+        this.translateService.setDefaultLang(defaultLang.code);
+      }
+      const parsedLanguages = JSON.parse(savedLanguages) as TgLanguage[];
+      this.languages.set(parsedLanguages);
+      const savedLang = parsedLanguages.find(l => l.code === savedLangCode);
+      if (savedLang) {
+        this.currentLanguage.set(savedLang);
+        this.translateService.use(savedLang.code);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  selectLanguage(language: TgLanguage): void {
+    this.currentLanguage.set(language);
+    this.translateService.use(language.code);
+    this.isOpen.set(false);
+
+    // Save preference to sessionStorage
+    sessionStorage.setItem('selectedLanguage', language.code);
+  }
+
+  toggleDropdown(event: Event): void {
+    event.stopPropagation();
+    const willOpen = !this.isOpen();
+    if (willOpen) {
+      this.updateDropdownPlacement();
+    }
+    this.isOpen.set(willOpen);
+  }
+
+  /**
+   * Decide where the dropdown opens — vertically (up/down) and horizontally
+   * (left/right). Each axis honours an explicit input value, otherwise it is
+   * auto-detected from the space available around the trigger in the viewport.
+   */
+  private updateDropdownPlacement(): void {
+    const rect = this.rootRef()?.nativeElement?.getBoundingClientRect();
+
+    // Vertical: flip up only when there isn't room below but there is more above.
+    const dir = this.direction();
+    if (dir === 'up') {
+      this.dropUp.set(true);
+    } else if (dir === 'down' || !rect) {
+      this.dropUp.set(false);
+    } else {
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      this.dropUp.set(spaceBelow < this.dropdownMaxHeightPx && spaceAbove > spaceBelow);
+    }
+
+    // Horizontal: anchor right only when a left-anchored menu would overflow and
+    // there is more room to the left.
+    const align = this.align();
+    if (align === 'right') {
+      this.alignRight.set(true);
+    } else if (align === 'left' || !rect) {
+      this.alignRight.set(false);
+    } else {
+      const spaceRight = window.innerWidth - rect.left;
+      const spaceLeft = rect.right;
+      this.alignRight.set(spaceRight < this.dropdownMinWidthPx && spaceLeft > spaceRight);
+    }
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: Event): void {
+    const host = this.rootRef()?.nativeElement;
+    if (!host || !host.contains(event.target as Node)) {
+      this.isOpen.set(false);
+    }
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    this.isOpen.set(false);
+  }
+
+  getDisplayName(language: TgLanguage): string {
+    return language?.nativeName || language?.englishName || language?.code?.toUpperCase() || '';
+  }
+}
+`;
+}
+
+function getLanguageSelectorTemplate(): string {
+  return `<div #root class="language-selector"
+  [ngClass]="mode() === 'dark' ? darkModeClass() : whiteModeClass()"
+  [style.z-index]="zIndex()"
+  (click)="toggleDropdown($event)">
+  <div class="current-language">
+    @if (currentLanguage()?.flag) {
+    <img
+      aria-label="Current language flag"
+      [src]="currentLanguage()?.flag"
+      [alt]="getDisplayName(currentLanguage()!)"
+      class="flag-icon">
+    }
+    <span class="language-name language-name-full">{{
+      getDisplayName(currentLanguage()!) }}</span>
+    <span class="language-name language-name-compact">{{
+      currentLanguage()?.code?.toUpperCase() }}</span>
+    <svg class="dropdown-icon" [class.open]="isOpen()" width="16" height="16"
+      viewBox="0 0 16 16" fill="currentColor">
+      <path d="M4 6l4 4 4-4z" />
+    </svg>
+  </div>
+
+  @if (isOpen()) {
+  <div class="language-dropdown" [class.drop-up]="dropUp()" [class.align-right]="alignRight()">
+    @for (language of languages(); track language.code) {
+    <div
+      class="language-option"
+      [class.selected]="language.code === currentLanguage()?.code"
+      (click)="selectLanguage(language); $event.stopPropagation()">
+      @if (language.flag) {
+      <img
+        aria-label="Language flag for {{ getDisplayName(language) }}"
+        [src]="language.flag"
+        [alt]="getDisplayName(language)"
+        class="flag-icon">
+      }
+      <span class="language-name language-name-full"
+        [title]="language.englishName">{{ getDisplayName(language) }}</span>
+      <span class="language-name language-name-compact">{{
+        language.code.toUpperCase() }}</span>
+      @if (language.code === currentLanguage()?.code) {
+      <svg class="check-icon"
+        width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path
+          d="M13.854 3.146a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 9.793l6.646-6.647a.5.5 0 0 1 .708 0z" />
+      </svg>
+      }
+    </div>
+    }
+  </div>
+  }
+</div>
+`;
+}
+
+/** Reads the target project's @angular/core major version (0 = unknown). */
+async function detectAngularMajor(workspaceRoot: string): Promise<number> {
+  try {
+    const pkgRaw = await fs.readFile(path.join(workspaceRoot, "package.json"), "utf8");
+    const pkg = JSON.parse(pkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    const spec = pkg.dependencies?.["@angular/core"] ?? pkg.devDependencies?.["@angular/core"] ?? "";
+    const match = spec.match(/(d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function getTgLanguageSelectorComponentLegacy(languagesJsonUrl: string): string {
+  return `/*
+ * This file is auto-generated by the Angular Translation Extractor extension.
+ * Any manual changes to this file may be lost when the extension runs again.
+ */
+import { Component, ElementRef, HostListener, Input, OnInit, ViewChild } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { TranslateService } from '@ngx-translate/core';
+import { HttpClient } from '@angular/common/http';
+
+export interface TgLanguage {
+  code: string;
+  englishName?: string;
+  nativeName?: string;
+  flag?: string;
+  default?: boolean;
+  active?: boolean;
+  rank?: number;
+}
+
+@Component({
+  selector: 'tg-language-selector',
+  standalone: true,
+  imports: [CommonModule],
+  templateUrl: './tg-language-selector.component.html',
+  styleUrls: ['./tg-language-selector.component.css']
+})
+export class TgLanguageSelectorComponent implements OnInit {
+  /** Vertical open direction. 'auto' flips upward when there is not enough room below. */
+  @Input() direction: 'auto' | 'up' | 'down' = 'auto';
+  /** Horizontal alignment. 'auto' anchors to the right edge when a left-anchored menu would overflow. */
+  @Input() align: 'auto' | 'left' | 'right' = 'auto';
+  /** Stacking context for the selector — raise it above overlays, sticky footers, etc. */
+  @Input() zIndex: number | string = 1000;
+  /** Class applied to the root when in white / dark mode — override to match your design system. */
+  @Input() whiteModeClass = 'white-mode';
+  @Input() darkModeClass = 'dark-mode';
+  @Input() mode: 'white' | 'dark' = 'white';
+  /** True when the dropdown should open upward (computed from direction / viewport space). */
+  dropUp = false;
+  /** True when the dropdown should anchor to its right edge (computed from align / viewport space). */
+  alignRight = false;
+  private readonly dropdownMaxHeightPx = 320;
+  private readonly dropdownMinWidthPx = 160;
+  languages: TgLanguage[] = [];
+  currentLanguage: TgLanguage | null = null;
+  isOpen = false;
+  @ViewChild('root') rootRef?: ElementRef<HTMLElement>;
+
+  constructor(
+    private translateService: TranslateService,
+    private http: HttpClient
+  ) { }
+
+  ngOnInit(): void {
+
+    if (this.getLanguagesFromSession()) {
+      return;
+    }
+    this.loadLanguages();
+  }
+
+  private loadLanguages(): void {
+
+    this.http.get<TgLanguage[]>('${languagesJsonUrl}')
+      .subscribe({
+        next: (langs) => {
+          this.languages = langs
+            .filter(l => l.active !== false)
+            .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+
+          const defaultLang = this.languages.find(l => l.default) || this.languages[0];
+          if (defaultLang) {
+            this.translateService.setDefaultLang(defaultLang.code);
+            this.translateService.use(defaultLang.code);
+          }
+
           const currentLang = this.translateService.currentLang || this.translateService.defaultLang;
           if (currentLang) {
             this.currentLanguage = this.languages.find(l => l.code === currentLang) || this.languages[0] || null;
@@ -592,16 +876,17 @@ export class TgLanguageSelectorComponent implements OnInit {
       });
   }
 
-   getLanguagesFromSession() {
+  getLanguagesFromSession() {
     const savedLangCode = sessionStorage.getItem('selectedLanguage');
     const savedLanguages = sessionStorage.getItem('languages');
     if (savedLanguages) {
-      var defaultLang = JSON.parse(savedLanguages).find((l: TgLanguage) => l.default) || JSON.parse(savedLanguages)[0];
+      const parsedLanguages = JSON.parse(savedLanguages) as TgLanguage[];
+      const defaultLang = parsedLanguages.find(l => l.default) || parsedLanguages[0];
       if (defaultLang) {
         this.translateService.setDefaultLang(defaultLang.code);
       }
-      this.languages = JSON.parse(savedLanguages) as TgLanguage[];
-      const savedLang = this.languages.find(l => l.code === savedLangCode);
+      this.languages = parsedLanguages;
+      const savedLang = parsedLanguages.find(l => l.code === savedLangCode);
       if (savedLang) {
         this.currentLanguage = savedLang;
         this.translateService.use(savedLang.code);
@@ -615,13 +900,62 @@ export class TgLanguageSelectorComponent implements OnInit {
     this.currentLanguage = language;
     this.translateService.use(language.code);
     this.isOpen = false;
-    
+
     // Save preference to sessionStorage
     sessionStorage.setItem('selectedLanguage', language.code);
   }
 
-  toggleDropdown(): void {
-    this.isOpen = !this.isOpen;
+  toggleDropdown(event: Event): void {
+    event.stopPropagation();
+    const willOpen = !this.isOpen;
+    if (willOpen) {
+      this.updateDropdownPlacement();
+    }
+    this.isOpen = willOpen;
+  }
+
+  /**
+   * Decide where the dropdown opens — vertically (up/down) and horizontally
+   * (left/right). Each axis honours an explicit input value, otherwise it is
+   * auto-detected from the space available around the trigger in the viewport.
+   */
+  private updateDropdownPlacement(): void {
+    const rect = this.rootRef?.nativeElement?.getBoundingClientRect();
+
+    const dir = this.direction;
+    if (dir === 'up') {
+      this.dropUp = true;
+    } else if (dir === 'down' || !rect) {
+      this.dropUp = false;
+    } else {
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      this.dropUp = spaceBelow < this.dropdownMaxHeightPx && spaceAbove > spaceBelow;
+    }
+
+    const align = this.align;
+    if (align === 'right') {
+      this.alignRight = true;
+    } else if (align === 'left' || !rect) {
+      this.alignRight = false;
+    } else {
+      const spaceRight = window.innerWidth - rect.left;
+      const spaceLeft = rect.right;
+      this.alignRight = spaceRight < this.dropdownMinWidthPx && spaceLeft > spaceRight;
+    }
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: Event): void {
+    const host = this.rootRef?.nativeElement;
+    if (!host || !host.contains(event.target as Node)) {
+      this.isOpen = false;
+    }
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    this.isOpen = false;
   }
 
   getDisplayName(language: TgLanguage): string {
@@ -631,48 +965,52 @@ export class TgLanguageSelectorComponent implements OnInit {
 `;
 }
 
-function getLanguageSelectorTemplate(): string {
-  return `<div class="language-selector" (click)="toggleDropdown()">
+function getLanguageSelectorTemplateLegacy(): string {
+  return `<div #root class="language-selector"
+  [ngClass]="mode === 'dark' ? darkModeClass : whiteModeClass"
+  [style.z-index]="zIndex"
+  (click)="toggleDropdown($event)">
   <div class="current-language">
-    <img 
+    <img
+      *ngIf="currentLanguage?.flag"
       aria-label="Current language flag"
-      *ngIf="currentLanguage?.flag" 
-      [src]="currentLanguage?.flag" 
+      [src]="currentLanguage?.flag"
       [alt]="getDisplayName(currentLanguage!)"
-      class="flag-icon"
-    >
-    <span class="language-name">{{ getDisplayName(currentLanguage!) }}</span>
-    <svg class="dropdown-icon" [class.open]="isOpen" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M4 6l4 4 4-4z"/>
+      class="flag-icon">
+    <span class="language-name language-name-full">{{
+      getDisplayName(currentLanguage!) }}</span>
+    <span class="language-name language-name-compact">{{
+      currentLanguage?.code?.toUpperCase() }}</span>
+    <svg class="dropdown-icon" [class.open]="isOpen" width="16" height="16"
+      viewBox="0 0 16 16" fill="currentColor">
+      <path d="M4 6l4 4 4-4z" />
     </svg>
   </div>
 
-  <div class="language-dropdown" *ngIf="isOpen">
-    <div 
-      *ngFor="let language of languages" 
+  <div class="language-dropdown" *ngIf="isOpen" [class.drop-up]="dropUp" [class.align-right]="alignRight">
+    <div
+      *ngFor="let language of languages"
       class="language-option"
       [class.selected]="language.code === currentLanguage?.code"
-      (click)="selectLanguage(language); $event.stopPropagation()"
-    >
-      <img 
+      (click)="selectLanguage(language); $event.stopPropagation()">
+      <img
+        *ngIf="language.flag"
         aria-label="Language flag for {{ getDisplayName(language) }}"
-        *ngIf="language.flag" 
-        [src]="language.flag" 
+        [src]="language.flag"
         [alt]="getDisplayName(language)"
-        class="flag-icon"
-      >
-      <span class="language-name" [title]="language.englishName">
-        {{ getDisplayName(language) }}
-      </span>
-      <svg *ngIf="language.code === currentLanguage?.code" class="check-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M13.854 3.146a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 9.793l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+        class="flag-icon">
+      <span class="language-name language-name-full"
+        [title]="language.englishName">{{ getDisplayName(language) }}</span>
+      <span class="language-name language-name-compact">{{
+        language.code.toUpperCase() }}</span>
+      <svg *ngIf="language.code === currentLanguage?.code" class="check-icon"
+        width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path
+          d="M13.854 3.146a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 9.793l6.646-6.647a.5.5 0 0 1 .708 0z" />
       </svg>
     </div>
   </div>
 </div>
-
-<!-- Optional: Add click-outside directive or use a backdrop -->
-<div class="language-backdrop" *ngIf="isOpen" (click)="isOpen = false"></div>
 `;
 }
 
@@ -685,6 +1023,7 @@ function getLanguageSelectorStyle(): string {
 
 /* Default white mode variables */
 :host {
+  display: block;
   --background: #ffffff;
   --border-color: #e0e0e0;
   --hover-background: #f5f5f5;
@@ -695,8 +1034,9 @@ function getLanguageSelectorStyle(): string {
   --selected-text-color: #1976d2;
 }
 
-/* White mode (explicit) */
-:host(.white-mode) {
+/* White mode (explicit). Keyed on the root class so the class name stays
+   customizable via the whiteModeClass/darkModeClass inputs (defaults below). */
+.language-selector.white-mode {
   --background: #ffffff;
   --border-color: #e0e0e0;
   --hover-background: #f5f5f5;
@@ -708,7 +1048,7 @@ function getLanguageSelectorStyle(): string {
 }
 
 /* Dark mode */
-:host(.dark-mode) {
+.language-selector.dark-mode {
   --background: #2d2d2d;
   --border-color: #404040;
   --hover-background: #3d3d3d;
@@ -722,6 +1062,7 @@ function getLanguageSelectorStyle(): string {
 .current-language {
   display: flex;
   align-items: center;
+  height: 40px;
   gap: 8px;
   padding: 8px 12px;
   background: var(--background);
@@ -730,6 +1071,32 @@ function getLanguageSelectorStyle(): string {
   cursor: pointer;
   transition: all 0.2s ease;
   min-width: 150px;
+}
+
+/* Compact display on small screens */
+@media (max-width: 640px) {
+  .current-language {
+    min-width: auto;
+    padding: 8px;
+    gap: 4px;
+  }
+
+  .language-name-full {
+    display: none;
+  }
+
+  .language-name-compact {
+    display: inline;
+  }
+
+  .language-dropdown {
+    min-width: 160px;
+  }
+}
+
+/* Hide compact label by default */
+.language-name-compact {
+  display: none;
 }
 
 .current-language:hover {
@@ -765,7 +1132,8 @@ function getLanguageSelectorStyle(): string {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  right: 0;
+  right: auto;
+  min-width: 100%;
   background: var(--background);
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -776,10 +1144,35 @@ function getLanguageSelectorStyle(): string {
   overflow-y: auto;
 }
 
+/* Opens upward when there isn't room below (see direction / dropUp). */
+.language-dropdown.drop-up {
+  top: auto;
+  bottom: calc(100% + 4px);
+  animation-name: dropdownSlideUp;
+}
+
+/* Anchors to the right edge when a left-anchored menu would overflow (see align / alignRight). */
+.language-dropdown.align-right {
+  left: auto;
+  right: 0;
+}
+
 @keyframes dropdownSlide {
   from {
     opacity: 0;
     transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dropdownSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
   }
 
   to {
@@ -814,15 +1207,6 @@ function getLanguageSelectorStyle(): string {
   color: var(--selected-text-color);
 }
 
-.language-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 999;
-}
-
 /* Scrollbar styling (optional) */
 .language-dropdown::-webkit-scrollbar {
   width: 6px;
@@ -839,6 +1223,5 @@ function getLanguageSelectorStyle(): string {
 
 .language-dropdown::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover-color, #999999);
-}
-`;
+}`;
 }

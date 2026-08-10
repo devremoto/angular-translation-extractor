@@ -7,7 +7,10 @@
             "request": "launch",
             "args": [
                 "--extensionDevelopmentPath=${workspaceFolder}",
-                "--user-data-dir=${workspaceFolder}/.vscode-test"
+                // Load ONLY this extension. Otherwise the dev host activates all 116 installed
+                // extensions (~4.5 GB) before the host reports ready, which is what trips the
+                // "extension host did not start in 10 seconds" warning.
+                "--disable-extensions"
             ],
             "outFiles": [
                 "${workspaceFolder}/dist/**/*.js"
@@ -24,13 +27,34 @@
             ]
         },
         {
+            // Same as "Run Extension" but writes a js-debug trace log, to diagnose why the
+            // debugger takes >10s to attach ("Extension host did not start in 10 seconds").
+            "name": "Run Extension (debug trace)",
+            "type": "extensionHost",
+            "request": "launch",
+            "trace": true,
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}",
+                "--disable-extensions"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/dist/**/*.js"
+            ],
+            "preLaunchTask": "${defaultBuildTask}",
+            "runtimeExecutable": "${execPath}",
+            "sourceMaps": true,
+            "skipFiles": [
+                "<node_internals>/**"
+            ]
+        },
+        {
             "name": "Extension Tests",
             "type": "extensionHost",
             "request": "launch",
             "args": [
                 "--extensionDevelopmentPath=${workspaceFolder}",
                 "--extensionTestsPath=${workspaceFolder}/out/test/suite/index",
-                "--user-data-dir=${workspaceFolder}/.vscode-test-tests"
+                "--disable-extensions"
             ],
             "outFiles": [
                 "${workspaceFolder}/out/test/**/*.js"

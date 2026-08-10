@@ -222,7 +222,14 @@ function evaluateAggressiveModeForFunctionArg(
   const contextValue = fnArgContext?.context ?? "";
   const sourceValue = fnArgContext?.callSource ?? "";
 
-
+  // HARD block, before every allow rule: string arguments of DOM/query APIs are CSS selectors,
+  // tag/attribute/event names — translating `querySelectorAll('img, .photo')` breaks the app.
+  if (DOM_API_ARG_RE.test(contextValue) || DOM_API_FIRST_ARG_RE.test(contextValue)) {
+    return { allowed: false, reason: "dom-api-argument (selector/attribute/event name, never user-facing)" };
+  }
+  if (looksLikeCssSelectorList(text)) {
+    return { allowed: false, reason: "css-selector-shaped string in function argument" };
+  }
 
   if (
     matchesRegexList(contextRegexList, contextValue)
@@ -275,6 +282,26 @@ type FunctionArgContext = {
   context: string;
   callSource: string;
 };
+
+/** DOM/query APIs where EVERY string argument is technical (selector, event, tag, class name). */
+const DOM_API_ARG_RE =
+  /(^|\.)(querySelector|querySelectorAll|closest|matches|getElementById|getElementsByClassName|getElementsByTagName|getElementsByName|createElement|createElementNS|addEventListener|removeEventListener|getAttribute|hasAttribute|removeAttribute|getPropertyValue|removeProperty|matchMedia|getContext|classList\.(?:add|remove|toggle|contains|replace))\(arg#\d+\)$/;
+
+/** DOM APIs where only the FIRST argument is technical (the second may be a user-facing value). */
+const DOM_API_FIRST_ARG_RE = /(^|\.)(setAttribute|setProperty|toggleAttribute|dispatchEvent)\(arg#1\)$/;
+
+/**
+ * True for strings shaped like a CSS selector list: every comma-separated token is a bare tag
+ * (`img`), a class/id/attr/pseudo chain (`.photo`, `#id`, `[data-x]`, `:hover`), or a simple
+ * compound of those. "Hello, world" fails (no selector marker); "img, .photo" matches.
+ */
+function looksLikeCssSelectorList(text: string): boolean {
+  const tokens = (text || "").split(",").map(t => t.trim()).filter(Boolean);
+  if (tokens.length === 0) return false;
+  const tokenRe = /^[a-zA-Z][\w-]*$|^[.#:[][\w.#:[\]="'~^$*-]+$|^[a-zA-Z][\w-]*[.#:[][\w.#:[\]="'~^$*-]*$/;
+  const hasMarker = tokens.some(t => /[.#:[]/.test(t));
+  return hasMarker && tokens.every(t => tokenRe.test(t));
+}
 
 function getFunctionArgumentContext(p: any, code: string): FunctionArgContext | null {
   const callExpr = p.findParent?.((pp: any) => pp.isCallExpression?.());
@@ -754,4 +781,49 @@ function indexFromLineCol(content: string, line: number, col: number): number {
   }
   if (currentLine !== line) return -1;
   return index + col;
+}
+
+/**
+ * Source ranges of `@Component({ template: ... })` inline template literals.
+ *
+ * Uses the same Babel parse this module already relies on — the previous ts-morph implementation
+ * pulled the whole TypeScript compiler (12.5 MB) into the bundle for this one lookup.
+ * Ranges are the literal's inner bounds, i.e. excluding the surrounding quotes/backticks.
+ */
+export function findInlineTemplateRanges(code: string): Array<{ start: number; end: number }> {
+  let ast: ReturnType<typeof parse>;
+  try {
+    ast = parse(code, {
+      sourceType: "unambiguous",
+      plugins: ["typescript", "decorators-legacy"]
+    });
+  } catch {
+    return [];
+  }
+
+  const ranges: Array<{ start: number; end: number }> = [];
+  traverse(ast, {
+    Decorator(decoratorPath: any) {
+      const expr = decoratorPath.node.expression;
+      if (expr?.type !== "CallExpression" || expr.callee?.name !== "Component") return;
+
+      const componentArg = expr.arguments?.[0];
+      if (componentArg?.type !== "ObjectExpression") return;
+
+      for (const prop of componentArg.properties) {
+        if (prop.type !== "ObjectProperty") continue;
+        const key = prop.key;
+        const keyName = key?.type === "Identifier" ? key.name : key?.type === "StringLiteral" ? key.value : "";
+        if (keyName !== "template") continue;
+
+        const value = prop.value;
+        const isLiteral = value?.type === "StringLiteral" || value?.type === "TemplateLiteral";
+        if (isLiteral && typeof value.start === "number" && typeof value.end === "number") {
+          ranges.push({ start: value.start + 1, end: value.end - 1 });
+        }
+      }
+    }
+  });
+
+  return ranges;
 }

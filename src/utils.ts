@@ -26,3 +26,16 @@ export function withoutExt(relPath: string): string {
 export function normalizeGlobRoot(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+$/g, "");
 }
+
+/**
+ * Web path a generated folder is served from at runtime: `outputRoot` relative to `srcDir`
+ * (the Angular served root), with a leading `./` and a trailing `/`.
+ * `src` + `src/assets/i18n` → `./assets/i18n/`; `projects/app/src` + `projects/app/src/assets/i18n` → `./assets/i18n/`.
+ */
+export function toServedPath(srcDir: string, outputRoot: string): string {
+  const src = normalizeGlobRoot(srcDir || "src");
+  const out = normalizeGlobRoot(outputRoot || "");
+  const rel = path.posix.relative(src, out);
+  const clean = (!rel || rel.startsWith("..") ? out.replace(/^src\//, "") : rel).replace(/^\/+/, "");
+  return `./${clean}/`.replace(/\/{2,}/g, "/");
+}

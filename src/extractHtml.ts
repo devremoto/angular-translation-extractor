@@ -24,10 +24,16 @@ export function extractFromHtmlContent(
   const attrsSet = new Set(attributeNames.map(a => a.toLowerCase()));
 
   // Mask <style> and <script> content to avoid false positives in regexes
-  const maskedHtml = html.replace(/(<(style|script)\b[^>]*>)([\s\S]*?)(<\/\2>)/gi, (match, open, tag, content, closeTag) => {
+  let maskedHtml = html.replace(/(<(style|script)\b[^>]*>)([\s\S]*?)(<\/\2>)/gi, (match, open, tag, content, closeTag) => {
     // Replace content with spaces, but preserve newlines to keep line numbers accurate
     return open + content.replace(/[^\n]/g, " ") + closeTag;
   });
+
+  // Mask HTML comments entirely. The tag regex below cannot parse `<!-- ... -->` (comments span
+  // lines and may contain `<style>`, quotes, `>`), so without this a comment's text is mistaken
+  // for a text node, extracted, and the replacement destroys the comment — unbalancing every
+  // tag after it (NG5002 far from the real damage).
+  maskedHtml = maskedHtml.replace(/<!--[\s\S]*?(?:-->|$)/g, match => match.replace(/[^\n]/g, " "));
 
   const tagRe = /<(?:\/|[a-zA-Z]|!)(?:[^<>"']|"[^"]*"|'[^']*')*>/g;
   let lastIndex = 0;
@@ -81,7 +87,17 @@ export function extractFromHtmlContent(
       parts.push({ content: rawContent, offset: 0 });
     }
 
-    for (const part of parts) {
+    // Split each part further on Angular control-flow syntax (braces and @block headers).
+    // Text nodes routinely carry `}`, `} @else {`, `@if (cond) {` — replacing across those
+    // tokens deletes block delimiters and corrupts the template (NG5002).
+    const segments = parts.flatMap(part =>
+      splitOutControlFlow(part.content).map(seg => ({
+        content: seg.content,
+        offset: part.offset + seg.offset
+      }))
+    );
+
+    for (const part of segments) {
       const text = decodeEntities(part.content).trim();
       if (!isProbablyUserFacing(text, minLen)) continue;
 
@@ -195,6 +211,39 @@ export function extractFromHtmlContent(
   }
 
   return found;
+}
+
+/**
+ * Angular block syntax that may appear inside a text node: `{`, `}`, and block headers like
+ * `@if (cond)`, `@else if (x)`, `@for (item of list; track item.id)`, `@switch`, `@defer` etc.
+ * Restricted to the known keywords so text like "user@example.com" is untouched.
+ */
+const CONTROL_FLOW_TOKEN_RE =
+  /@else\s+if\b(?:\s*\((?:[^()]|\([^()]*\))*\))?|@(?:if|for|switch|case|default|empty|defer|placeholder|loading|error|let)\b(?:\s*\((?:[^()]|\([^()]*\))*\))?|@else\b|[{}]/g;
+
+/**
+ * Splits a text-node chunk into segments that lie BETWEEN control-flow tokens.
+ * The tokens themselves (braces, @block headers) are dropped — they are template
+ * structure, never user-facing text, and must never be replaced.
+ */
+export function splitOutControlFlow(content: string): Array<{ content: string; offset: number }> {
+  if (!/[{}]|@[a-z]/i.test(content)) {
+    return [{ content, offset: 0 }];
+  }
+  const segments: Array<{ content: string; offset: number }> = [];
+  let last = 0;
+  CONTROL_FLOW_TOKEN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = CONTROL_FLOW_TOKEN_RE.exec(content))) {
+    if (m.index > last) {
+      segments.push({ content: content.slice(last, m.index), offset: last });
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < content.length) {
+    segments.push({ content: content.slice(last), offset: last });
+  }
+  return segments;
 }
 
 function isProbablyUserFacing(s: string, minLen: number): boolean {

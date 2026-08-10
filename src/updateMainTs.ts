@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { toServedPath } from "./utils";
 
 export type UpdateMainTsResult = {
     updated: boolean;
@@ -18,8 +19,9 @@ export async function updateMainTs(opts: {
 }): Promise<UpdateMainTsResult> {
     const { workspaceRoot, srcDir, mainTsPath, baseLocaleCode, bootstrapStyle, updateMode, outputRoot } = opts;
 
-    // Convert outputRoot to relative path for use in loader (e.g., "src/assets/I18n" -> "./assets/I18n/")
-    const outputRootRelative = `./${outputRoot.replace(/^src\//, "")}/`.replace(/\/\/+/g, "/");
+    // Convert outputRoot to a web path relative to the source folder, which is the served
+    // root (e.g. srcDir "projects/app/src" + outputRoot "projects/app/src/assets/i18n" -> "./assets/i18n/").
+    const outputRootRelative = toServedPath(srcDir, outputRoot);
 
     const resolvedRel = mainTsPath.replace("{srcDir}", srcDir);
     const abs = path.isAbsolute(resolvedRel) ? resolvedRel : path.join(workspaceRoot, resolvedRel);
