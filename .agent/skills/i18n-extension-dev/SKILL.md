@@ -34,9 +34,10 @@ To debug the extension:
 
 ## Key Components
 
-- `src/extractJsTs.ts`: Handles parsing of JS/TS files using Babel. **Only extracts inline HTML templates from `@Component` decorators** (the `template` property). Does NOT extract from component methods or properties, and does NOT extract from other classes. Skips all decorator properties except `template`.
-- `src/extractHtml.ts`: Handles parsing of HTML files and inline templates using Regex. Extracts text content, attributes, and interpolations. **Skips pipe format arguments** (e.g., `date:'short'`, `currency:'USD'`) to preserve Angular pipe configurations.
-- `src/replaceSource.ts`: Handles the replacement of extracted strings with translation keys in the source files.
+- `src/config.ts`: **`resolveProject(triggerPath)` is the single source of truth for all paths** — there are no path settings. It finds the nearest `angular.json` (up from the trigger, then down), reads `sourceRoot` and the build target's `main` from it, and derives `outputRoot` (`<src>/assets/i18n`) and `languagesJsonPath` (`<src>/app/core/json/language-code.json`). Throws when no `angular.json` exists; memoized per folder (`clearProjectCache()` on config change).
+- `src/extractJsTs.ts`: Handles parsing of JS/TS files using Babel. **Only extracts inline HTML templates from `@Component` decorators** (the `template` property). Skips all decorator properties except `template`. **Hard-blocks DOM API arguments** (`querySelectorAll`, `closest`, `addEventListener`, `classList.*`, …) and CSS-selector-shaped strings — checked before every allow rule, including user regex overrides.
+- `src/extractHtml.ts`: Handles parsing of HTML files and inline templates using Regex. Extracts text content, attributes, and interpolations. **Masks HTML comments and `<style>`/`<script>` bodies** (length-preserving) and **segments text nodes on Angular control-flow tokens** (`{`, `}`, `@if`/`@else`/`@for` headers) so template structure is never extracted or replaced. Skips pipe format arguments (e.g., `date:'short'`).
+- `src/replaceSource.ts`: Replaces extracted strings with translation keys. Uses a **Babel `analyzeClasses()` pass** per TS file: real member names (never object-literal keys), the existing `inject(TranslateService)` member or ctor param property, and class body ranges. Emits `this.<accessor>.instant(...)` only **inside a class body** (skips + warns otherwise). Injects `private translateService = inject(TranslateService)` with collision-free naming, reuses any existing injection, and repairs collisions from older versions (renaming the member and its usages in TS and templates — pipe usages `| translate` and method calls are never renamed).
 - `src/generate.ts`: Generates the JSON translation files.
 
 ## Common Issues & Fixes
@@ -48,6 +49,13 @@ To debug the extension:
 - **Verify the class has `@Component` decorator**: Only strings in `@Component` classes are extracted from inline templates.
 - **Check template property**: Only the `template` property of `@Component` is scanned. Other properties like `selector`, `providers`, `styles` are ignored (framework-critical).
 - Check `isProbablyUserFacing` regex in `extractHtml.ts` for false negatives.
+- **Deliberately never extracted** (defensive guards — do not "fix" these): Angular control-flow text (`}`, `@else {`), HTML comment contents, DOM API arguments (`querySelectorAll('img, .photo')`), CSS-selector-shaped strings, and TS strings outside any class body (`this.` would not compile there).
+
+### 1b. Wrong project / paths detected
+
+- All paths come from `resolveProject(triggerPath)` in `src/config.ts` — the output channel logs the detected project root and source folder at the start of every run.
+- Trigger the command from a file/folder inside the intended Angular app (monorepos bind to the project owning the trigger path).
+- No `angular.json` above or below the trigger → the command aborts with an error message, by design.
 
 ### 2. Pipe format strings being extracted
 

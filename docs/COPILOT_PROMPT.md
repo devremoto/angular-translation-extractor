@@ -34,7 +34,7 @@ Build a VS Code extension (TypeScript) that extracts hard-coded user-facing stri
   - `flag`: `https://flagcdn.com/w40/{countryCodeLower}.png` (only when a 2-letter region exists)
 - Write normalized entries back to the same JSON file.
 
-4. Output path is configurable (default `src/assets/I18n`). Replicate folder structure relative to `srcDir` and create a folder per source file:
+4. Output path is detected, not configured: always `<sourceRoot>/assets/i18n` of the Angular project that owns the trigger path (`sourceRoot` read from `angular.json`; nearest `angular.json` found by searching up from the trigger, then down from the opened folder; no `angular.json` → abort with an error). Replicate folder structure relative to the source root and create a folder per source file:
 
 - Source: `src/components/component1.html`
 - Output folder: `src/assets/I18n/components/component1/`
