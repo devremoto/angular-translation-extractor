@@ -6,13 +6,17 @@
 
 A VS Code extension that automatically extracts hard-coded user-facing strings from your Angular source code, generates organized i18n JSON files with support for multiple locales, and automatically replaces strings in your source code with translation keys.
 
+![Usage demo — extract, auto-translate, switch languages](assets/usage-demo.gif)
+
 ## Features
 
 - 🔍 **Automatic String Extraction** - Scans JS/TS/HTML files for user-facing strings
-- 📁 **Consolidated Locale Output** - Generates one locale JSON per language in `outputRoot` (for example `en-US.json`, `pt-BR.json`)
-- 🔄 **Source Code Transformation** - Replaces strings with translation keys (`{{ 'KEY' | translate }}` in HTML, `this.translate.instant('KEY')` in TS)
+- 🧭 **Zero Path Configuration** - Detects the Angular project from where you trigger the command (nearest `angular.json`, up or down), reads the source folder from its `sourceRoot`, and derives every other path from it — monorepos like `projects/app/src` work with no settings
+- 📁 **Consolidated Locale Output** - Generates one locale JSON per language in `<sourceRoot>/assets/i18n` (for example `en-US.json`, `pt-BR.json`)
+- 🔄 **Source Code Transformation** - Replaces strings with translation keys (`{{ 'KEY' | translate }}` in HTML, `this.translateService.instant('KEY')` in TS)
 - 🧩 **Auto-Import TranslateModule** - Automatically adds TranslateModule to component imports arrays
-- 💉 **Auto-Inject TranslateService** - Automatically injects TranslateService in TS files (constructor or `inject()` style)
+- 💉 **Collision-Safe TranslateService Injection** - Reuses any existing injection (`inject()` or constructor, any name); otherwise injects `private translateService = inject(TranslateService)`, picking a name that never collides with your class members — and repairs collisions left by older versions
+- 🛡️ **Defensive Extraction** - Never touches Angular control-flow syntax (`@if`/`@else`/`@for` braces), HTML comments, CSS selectors in DOM calls (`querySelectorAll`), or strings outside a class where `this.` cannot compile
 - 🌍 **Smart Language Handling** - Generate files for specific locales (en-US) or main languages (en) with automatic fallback
 - 🎯 **Active Language Filtering** - Generate only active languages from your configuration
 - 🔑 **Nested Key Structure** - UPPERCASE keys with underscores in hierarchical JSON format
@@ -70,7 +74,7 @@ These packages are required for the generated translation loader to work in your
 
 ### 1. Create a Languages List File
 
-Create a JSON file (default: `src/app/core/json/language-code.json`) with your target locales:
+Create the languages list at `<sourceRoot>/app/core/json/language-code.json` (e.g. `src/app/core/json/language-code.json`) with your target locales:
 
 ```json
 [
@@ -101,15 +105,15 @@ Create a JSON file (default: `src/app/core/json/language-code.json`) with your t
 - `rank` (optional) - Sort order for language selection UI
 - `englishName`, `nativeName`, `flag` (auto-generated) - Extension will fill these automatically
 
-### 2. Configure Settings (Optional)
+### 2. That's It — Paths Are Detected
 
-Open VS Code Settings (`Ctrl+,` or `Cmd+,`) and search for "Angular Translation Extractor" to customize:
+There is nothing to configure for paths. When you run a command, the extension:
 
-- Source directory to scan
-- Output directory for locale files
-- Default language from `languagesJsonPath` (`default: true`)
-- Minimum string length
-- HTML attributes to extract
+1. Finds the **Angular project** that owns the file/folder you triggered from — the nearest `angular.json`, searched up from the trigger and then down from the opened folder. No `angular.json` anywhere → the command stops with a clear error.
+2. Reads the **source folder** from that project's `sourceRoot` (so `projects/app/src` monorepos work untouched).
+3. Derives every path from it: locale JSONs go to `<sourceRoot>/assets/i18n`, the languages list is `<sourceRoot>/app/core/json/language-code.json`, and `main.ts` comes from the build target in `angular.json`.
+
+Behaviour (not paths) can still be customized in VS Code Settings (`Ctrl+,` → "Angular Translation Extractor"): minimum string length, HTML attributes to extract, aggressive mode, auto-translate, ignore globs.
 
 ### 3. Run the Extraction
 
@@ -260,13 +264,12 @@ const title = `User Profile`;
 
 ## Configuration Settings
 
-You can configure the extension through VS Code settings (`settings.json`) or the Settings UI:
+**Paths are not settings.** The Angular project root, source folder, locale output folder, languages list and `main.ts` are all detected from your `angular.json` (see *Getting Started*). The old `rootPath`, `srcDir`, `outputRoot`, `languagesJsonPath` and `mainTsPath` settings were removed — delete them from your `settings.json` if present; they are ignored.
+
+Behaviour can be configured through VS Code settings (`settings.json`) or the Settings UI:
 
 | Setting ID                                      | Description                                                                    | Default                                                                                                                                                                                                                          |
 | ----------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `i18nExtractor.srcDir`                          | Source folder to scan                                                          | `src`                                                                                                                                                                                                                            |
-| `i18nExtractor.outputRoot`                      | Output folder for translations                                                 | `src/assets/i18n`                                                                                                                                                                                                                |
-| `i18nExtractor.languagesJsonPath`               | Path to your languages JSON file                                               | `src/app/core/json/language-code.json`                                                                                                                                                                                           |
 | `i18nExtractor.aggressiveMode`                  | Function-parameter extraction mode: `low`, `moderate`, `high`                  | `moderate`                                                                                                                                                                                                                       |
 | `i18nExtractor.aggressiveModeAllowCallRegex`    | Regex allowlist for full function-call source (priority over `aggressiveMode`) | `[^alert\\s*\\(, ^confirm\\s*\\(, ^prompt\\s*\\(]`                                                                                                                                                                               |
 | `i18nExtractor.aggressiveModeAllowContextRegex` | Regex allowlist for argument context (priority over `aggressiveMode`)          | `[^window\\.alert\\(arg#1\\)$, ^window\\.confirm\\(arg#1\\)$, ^window\\.prompt\\(arg#1\\)$]`                                                                                                                                     |
@@ -274,7 +277,6 @@ You can configure the extension through VS Code settings (`settings.json`) or th
 | `i18nExtractor.ignoreGlobs`                     | Glob patterns to ignore                                                        | `["\*\*/*.test._", "\*\*/_.spec.\*", "**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**", "**/.angular/**", "**/app.html", "**/index.html", "**/assets/**", "**/environments/**", "**/.agent/**", "**/.vscode/**"]` |
 | `i18nExtractor.skipGlobs`                       | Additional glob patterns to skip                                               | `[]`                                                                                                                                                                                                                             |
 | `i18nExtractor.htmlAttributeNames`              | HTML attributes to extract                                                     | `["title", "alt", "placeholder", "aria-label", "aria-placeholder"]`                                                                                                                                                              |
-| `i18nExtractor.mainTsPath`                      | Path to`main.ts`                                                               | `{srcDir}/main.ts`                                                                                                                                                                                                               |
 | `i18nExtractor.angularBootstrapStyle`           | `standalone`or`module`                                                         | `standalone`                                                                                                                                                                                                                     |
 | `i18nExtractor.updateMode`                      | Source source updates:`merge`, `overwrite`, `recreate`                         | `merge`                                                                                                                                                                                                                          |
 | `i18nExtractor.autoTranslate`                   | Automatically translate keys                                                   | `true`                                                                                                                                                                                                                           |
@@ -286,7 +288,7 @@ You can configure the extension through VS Code settings (`settings.json`) or th
 
 ### Language Configuration File
 
-The `languagesJsonPath` file defines your supported languages:
+The `<sourceRoot>/app/core/json/language-code.json` file defines your supported languages:
 
 ```json
 [
@@ -429,7 +431,7 @@ import { TgTranslationLoader } from './translate/tg-translate-loader';
 export function HttpLoaderFactory(
   http: HttpClient,
 ): TranslateLoader {
-  // The path is automatically configured based on your outputRoot setting
+  // The path is derived from your Angular project's sourceRoot
   return new TgTranslationLoader(
     http,
     './assets/I18n/',
@@ -437,7 +439,7 @@ export function HttpLoaderFactory(
 }
 ```
 
-The loader path is automatically generated based on your `i18nExtractor.outputRoot` configuration setting. If you need a custom path, you can modify the prefix parameter. The auto-generated translate/readme.md file includes the full configuration details.
+The loader path is derived automatically from your Angular project's `sourceRoot` (locales are served from `./assets/i18n/`). If you need a custom path, you can modify the prefix parameter. The auto-generated translate/readme.md file includes the full configuration details.
 
 ## Language Selector Component
 
@@ -537,19 +539,17 @@ The component will auto-generate basic labels if metadata is missing, but provid
 
 Access settings via: **File → Preferences → Settings** (or `Ctrl+,`) → Search for "Angular Translation Extractor"
 
+> **Paths are detected, not configured** — project root from the nearest `angular.json`, source folder from its `sourceRoot`, locales at `<sourceRoot>/assets/i18n`, languages list at `<sourceRoot>/app/core/json/language-code.json`, `main.ts` from the build target.
+
 ### Basic Settings
 
 | Setting                                         | Default                                                                                      | Description                                                                                                                                                          |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `i18nExtractor.srcDir`                          | `"src"`                                                                                      | Folder to scan for source files (relative to workspace root)                                                                                                         |
-| `i18nExtractor.outputRoot`                      | `"src/assets/I18n"`                                                                          | Output root for generated locale JSONs                                                                                                                               |
-| `i18nExtractor.languagesJsonPath`               | `"src/app/core/json/language-code.json"`                                                     | Path to languages list JSON file                                                                                                                                     |
 | `i18nExtractor.aggressiveMode`                  | `"moderate"`                                                                                 | Function-parameter extraction mode: `"low"` blocks all, `"moderate"` allows multi-word, `"high"` allows all                                                          |
 | `i18nExtractor.aggressiveModeAllowCallRegex`    | `[^alert\\s*\\(, ^confirm\\s*\\(, ^prompt\\s*\\(]`                                           | Regex allowlist matched against full call source (example: `alert('teste')`). Matches have priority over `aggressiveMode`                                            |
 | `i18nExtractor.aggressiveModeAllowContextRegex` | `[^window\\.alert\\(arg#1\\)$, ^window\\.confirm\\(arg#1\\)$, ^window\\.prompt\\(arg#1\\)$]` | Regex allowlist matched against function argument context (example: `this.toastr.error(arg#1)`). Matches have priority over `aggressiveMode`                         |
 | `i18nExtractor.minStringLength`                 | `2`                                                                                          | Ignore strings shorter than this length                                                                                                                              |
 | `i18nExtractor.updateMode`                      | `"merge"`                                                                                    | Controls JSON file updates:`"merge"`(preserve translations, add new keys),`"overwrite"`(recreate non-default languages),`"recreate"`(recreate all including default) |
-| `i18nExtractor.mainTsPath`                      | `"{srcDir}/main.ts"`                                                                         | Path to Angular main.ts (supports`{srcDir}`placeholder)                                                                                                              |
 | `i18nExtractor.angularBootstrapStyle`           | `"standalone"`                                                                               | How to wire TranslateModule in main.ts (`standalone`or`module`)                                                                                                      |
 | `i18nExtractor.updateMainTs`                    | `true`                                                                                       | If true, update main.ts to wire the translation loader                                                                                                               |
 
@@ -1153,7 +1153,7 @@ Commit both base and target locale files. Translators can work with the target l
 
 ### 4. Start Small
 
-Test on a single directory first by adjusting `srcDir` setting, then expand to your full source tree.
+Right-click a single folder and use **Extract translations (File)** / run on a subfolder first, then run **Extract translations (All app)** for the full source tree.
 
 ### 5. Customize Filtering
 
@@ -1164,7 +1164,7 @@ Add patterns to `ignoreGlobs` for any folders or files you don't want scanned.
 ### No strings extracted
 
 - Check the **Output** panel (View → Output) and select "Angular Translation Extractor"
-- Verify `srcDir` points to the correct folder
+- Verify the command was triggered from inside your Angular project (the output panel logs the detected project root and source folder)
 - Check if files are excluded by `ignoreGlobs` patterns
 - Increase `minStringLength` if needed
 
