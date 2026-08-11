@@ -15,7 +15,7 @@
   "publisher": "AdilsondeAlmeidaPedro",
   "repository": {
     "type": "git",
-    "url": "https://github.com/devremoto/angular-tanslation-extractor"
+    "url": "https://github.com/devremoto/angular-translation-extractor"
   },
   "engines": {
     "vscode": "^1.85.0"

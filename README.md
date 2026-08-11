@@ -1300,7 +1300,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE.txt) 
 If you encounter any issues or have questions:
 
 1. Check the [Known Limitations](#-known-limitations) section
-2. Search existing [issues](https://github.com/devremoto/angular-tanslation-extractor/issues)
+2. Search existing [issues](https://github.com/devremoto/angular-translation-extractor/issues)
 3. Create a new issue with detailed reproduction steps
 
 ## ⭐ Acknowledgments
